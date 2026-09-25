@@ -1,9 +1,11 @@
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Blanks = require(ReplicatedStorage.Shared.Data.Blanks)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
+local EdgeBleed = require("./Utils/EdgeBleed")
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local RegionMaps = require(ReplicatedStorage.Shared.Data.RegionMaps)
 
@@ -113,6 +115,21 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	-- A layer-catalog blank shows its paint as a decal over the layer decals and composes the final
 	-- texture later, so its paint layers stay transparent and no SurfaceAppearance is bound.
 	local usesLayerDecals = blankData.layerCatalogName ~= nil
+
+	-- The layer decals show this paint scaled down, so its transparent edges need their color bled
+	-- out. That is a full-image pass, so it runs once edits pause rather than on every merge.
+	local pendingEdgeBleeds: { [LayerInfo]: thread } = {}
+	local function scheduleEdgeBleed(layerInfo: LayerInfo)
+		local pending = pendingEdgeBleeds[layerInfo]
+		if pending then
+			task.cancel(pending)
+		end
+
+		pendingEdgeBleeds[layerInfo] = task.delay(CreationConfig.paintEdgeBleedDelay, function()
+			pendingEdgeBleeds[layerInfo] = nil
+			EdgeBleed.bleed(layerInfo.outputEditableImage)
+		end)
+	end
 
 	local destroyAllTrackedImages
 	local function throwMemoryError()
@@ -758,6 +775,10 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	function object:updateOutputColorMap(meshPart: MeshPart)
 		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
 		doMergeDownLayers(layerInfo)
+
+		if usesLayerDecals and RunService:IsClient() then
+			scheduleEdgeBleed(layerInfo)
+		end
 	end
 
 	--[=[
@@ -829,6 +850,11 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	end
 
 	function object:destroy()
+		for _, pending in pendingEdgeBleeds do
+			task.cancel(pending)
+		end
+		table.clear(pendingEdgeBleeds)
+
 		for _, layerInfo in pairs(self.modelTextureInfo) do
 			for _, layer in layerInfo.inputLayers do
 				layer.editableImage:Destroy()

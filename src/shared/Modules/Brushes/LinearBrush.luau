@@ -202,8 +202,6 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 			)
 		end
 
-		TextureUtils.bleedColorIntoTransparent(self.targetEditableImage, rectPosition, rectSize)
-
 		self.drawPositions[#self.drawPositions + 1] = newPosition
 		self.lastPenPosition = newPosition
 	end
