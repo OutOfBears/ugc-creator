@@ -1,0 +1,70 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Scripts To Place",
+      "type": "shell",
+      "command": "rojo build --output Scripts.rbxl ./default.project.json",
+      "windows": {
+        "command": "rojo build --output Scripts.rbxl ./default.project.json"
+      }
+    },
+    {
+      "label": "Build Assets From Place",
+      "type": "shell",
+      "command": "lune run buildAssetsFromPlace ${input:userPlace}",
+      "windows": {
+        "command": "lune run buildAssetsFromPlace ${input:userPlace}"
+      }
+    },
+    {
+      "label": "Build Place",
+      "type": "shell",
+      "dependsOn": ["Build Scripts To Place"],
+      "dependsOrder": "sequence",
+      "command": "rbx-build merge -s ./Scripts.rbxl -b ./Assets.rbxl -o Game.rbxl",
+      "windows": {
+        "command": "rbx-build merge -s ./Scripts.rbxl -b ./Assets.rbxl -o Game.rbxl"
+      }
+    },
+    {
+      "label": "Publish Place",
+      "type": "shell",
+      "command": "lune run publishGameToPlace ${input:userPlace}",
+      "windows": {
+        "command": "lune run publishGameToPlace ${input:userPlace}"
+      }
+    },
+    {
+      "label": "Build & Publish Game",
+      "type": "shell",
+      "dependsOn": ["Build Place", "Publish Place"],
+      "dependsOrder": "sequence"
+    },
+    {
+      "label": "Start Rojo",
+      "type": "shell",
+      "command": "${command:vscode-rojo.serveRecent}",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "new"
+      },
+      "runOptions": {
+        "runOn": "folderOpen"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "type": "pickString",
+      "id": "userPlace",
+      "description": "Select A Universe",
+      "options": [
+        {
+          "label": "Bears Universe",
+          "value": "10144949514"
+        }
+      ]
+    }
+  ]
+}

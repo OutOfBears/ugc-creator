@@ -1,0 +1,32 @@
+{
+  "editor.formatOnSave": true,
+
+  "luau-lsp.sourcemap.enabled": true,
+  "luau-lsp.sourcemap.autogenerate": true,
+  "luau-lsp.sourcemap.rojoProjectFile": "default.project.json",
+  "luau-lsp.completion.imports.stringRequires.enabled": false,
+  "luau-lsp.fflags.enableNewSolver": true,
+
+  "stylua.targetReleaseVersion": "latest",
+
+  "github.copilot.chat.commitMessageGeneration.instructions": [
+    {
+      "text": "Prefix the subject with a Conventional Commits type such as feat:, fix:, refactor:, or chore:."
+    },
+    {
+      "text": "Write the subject line in imperative mood, keep it under 72 characters, and make it convey the primary change at a glance."
+    },
+    {
+      "text": "When a body is warranted, separate it from the subject with a blank line and express each point as a dash-prefixed bullet beginning with a past-tense verb (e.g. Added, Removed, Renamed)."
+    },
+    {
+      "text": "Each bullet should capture a meaningful outcome or action; omit trivial or granular details like individual property additions."
+    },
+    {
+      "text": "Surround any code identifiers, file names, or paths with backticks."
+    },
+    {
+      "text": "Bullets must be purely factual — state what happened, never include reasoning, motivation, or justification."
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+# rbx-products source of truth for every gamepass and developer product.
+#
+# Managed by the `rbx-products` CLI (https://github.com/OutOfBears/rbx-products), NOT by hand
+# beyond seeding new entries here. Workflow before shipping:
+#   1. set `universe-id` below
+#   2. `cargo install rbx_products`
+#   3. `rbx-products download`   -- pulls any already-created products (fills real ids/prices)
+#   4. `rbx-products sync`       -- creates the new products and rewrites src/shared/Data/Products.luau
+#
+# Run `download` before your first `sync` so existing live products keep their real price instead
+# of being overwritten by the placeholder values here.
+#
+# `id = 0` means "not created yet" -- sync assigns the real id. `active = false` entries are wired
+# for ids only and have no gameplay effect yet, so they stay unpurchasable until implemented.
+
+[metadata]
+universe-id = 0
+luau-file = "src/shared/Data/Products.luau"
+name-filters = []
+
+# ============================================================================
+# Gamepasses -- replace this placeholder with your own.
+# ============================================================================
+
+[gamepasses."ExampleGamepass"]
+name = "Example Gamepass"
+id = 0
+price = 99
+active = false
+
+# ============================================================================
+# Developer products -- replace this placeholder with your own.
+# ============================================================================
+
+[products."ExampleProduct"]
+name = "Example Product"
+id = 0
+price = 25
+active = false

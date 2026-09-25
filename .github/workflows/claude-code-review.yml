@@ -1,0 +1,89 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+    # Optional: scope reviews to Luau source only
+    # paths:
+    #   - "src/**/*.luau"
+    #   - "src/**/*.lua"
+
+concurrency:
+  group: claude-review-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    # Skip drafts; the `ready_for_review` trigger above still covers them when promoted.
+    if: github.event.pull_request.draft == false
+
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          use_sticky_comment: true
+          track_progress: true
+          # Pin a faster model to cut review latency and shrink the stale-comment window.
+          claude_args: '--model claude-sonnet-4-6'
+          prompt: |
+            /code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+            Start your review by noting the commit you reviewed:
+            "Reviewed `${{ github.event.pull_request.head.sha }}`". If this SHA is not the
+            latest commit on the PR, say so.
+
+            Scope: review ONLY the files changed in this PR (the diff between the base and
+            head). Do not review, audit, or comment on unchanged files or the broader
+            codebase — findings must reference a line this PR added or modified.
+
+            First, verify the PR's repository conventions from CLAUDE.md (flag any violation):
+            - Branch name follows the `type/name` convention — one of `feature/`, `task/`,
+              `support/`, `hotfix/`, or `release/v<x.y.z>`. The PR head branch is
+              `${{ github.event.pull_request.head.ref }}`.
+            - Every commit message follows Conventional Commits (`type(scope): summary`, with
+              types like feat/fix/docs/refactor/perf/test/build/chore; `!` or `BREAKING CHANGE:`
+              for breaking changes).
+            - No AI attribution in commits: author is the human developer (not
+              `Claude <noreply@anthropic.com>`), and messages carry no `Claude-Session:` trailer,
+              `Co-authored-by: Claude …`, or model identifiers.
+
+            This is a Luau/Roblox project. Follow the guidance in CLAUDE.md. When reviewing
+            the changed files, prioritize:
+            - Server/client boundary violations (server modules required from client code, or vice versa)
+            - Missing nil-guards on Roblox APIs (Player.Character, :FindFirstChild, :GetAttribute, etc.)
+            - Deprecated wait() / spawn() usage — should be task.wait / task.spawn / task.defer
+            - Raw RemoteEvent / RemoteFunction usage — networking must go through src/shared/Modules/Network
+            - State set via :SetAttribute that should live in a Component's replicated state instead
+            - Named numeric/config constants declared at file top — these belong in a Data/ module
+              (src/server/Data or src/shared/Data), not as top-of-file UPPER_SNAKE blocks
+            - Duplicated logic that reuses existing utilities/base classes (Maid, Network, the
+              reuse index in CLAUDE.md); new free module-level functions that should be methods
+              on the component/service object instead
+            - Component conventions: functional classes (constructor returns object, no setmetatable),
+              init/destroy lifecycle, connections owned through a Maid
+            - Edits to generated files (Packages/, ServerPackages/, sourcemap.json, wally.lock, assets/*.rbxm)
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options

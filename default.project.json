@@ -1,0 +1,89 @@
+{
+  "name": "ugc-game",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Packages": {
+        "$path": "Packages"
+      },
+      "Client": {
+        "$path": "src/client"
+      },
+      "Settings": {
+        "$path": "src/Settings.json"
+      },
+      "Replicators": {
+        "$className": "Folder"
+      },
+      "Assets": {
+        "$className": "Folder"
+      }
+    },
+
+    "ServerScriptService": {
+      "Runtime": {
+        "$path": "src/Server.server.luau"
+      },
+      "Server": {
+        "$path": "src/server"
+      },
+      "TagSchema": {
+        "$path": "src/TagSchema.luau"
+      },
+      "Packages": {
+        "$path": "ServerPackages"
+      }
+    },
+
+    "Players": {
+      "$className": "Players",
+      "$properties": {
+        "CharacterAutoLoads": true
+      }
+    },
+
+    "StarterGui": {
+      "$className": "StarterGui",
+      "$properties": {
+        "ClipsDescendantsSupportsRotation": "Enabled"
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Runtime": {
+          "$path": "src/Client.client.luau"
+        },
+        "PlayerModule": {
+          "$path": "assets/PlayerModule.rbxm"
+        }
+      }
+    },
+
+    "Workspace": {
+      "$properties": {
+        "FilteringEnabled": true
+      }
+    },
+    "Lighting": {
+      "$properties": {
+        "Ambient": [0, 0, 0],
+        "Brightness": 2,
+        "GlobalShadows": true,
+        "Outlines": false,
+        "Technology": "Voxel"
+      }
+    },
+    "SoundService": {
+      "$properties": {
+        "RespectFilteringEnabled": true
+      }
+    }
+  }
+}

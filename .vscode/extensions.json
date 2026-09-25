@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "JohnnyMorganz.stylua",
+    "JohnnyMorganz.luau-lsp",
+    "eamodio.gitlens",
+    "Gruntfuggly.todo-tree",
+    "tamasfe.even-better-toml",
+    "Anthropic.claude-code",
+    "juanlb.claude-commit"
+  ]
+}

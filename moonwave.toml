@@ -1,0 +1,89 @@
+title = "Template"
+gitRepoUrl = "https://github.com/your-org/template"
+gitSourceBranch = "main"
+changelog = false
+
+[[classOrder]]
+section = "Behaviors"
+classes = [
+	"Behaviors",
+	"BehaviorBase",
+]
+
+[[classOrder]]
+section = "Services"
+classes = [
+	"KonsoleService",
+]
+
+[[classOrder]]
+section = "Networking"
+classes = [
+	"NetworkServer",
+	"NetworkClient",
+	"NetworkDummy",
+	"AttributeReplicator",
+]
+
+[[classOrder]]
+section = "Client"
+classes = [
+	"ClientAtoms",
+]
+
+[[classOrder]]
+section = "Utilities"
+classes = [
+	"AnimationUtils",
+	"AssetUtil",
+	"Bezier",
+	"EffectsUtils",
+	"InputContext",
+	"MathUtils",
+	"PartCache",
+	"PhysicsUtil",
+	"RaycastUtils",
+	"StringUtil",
+]
+
+[[classOrder]]
+section = "Effects"
+classes = [
+	"CameraShaker",
+	"ShakerInstance",
+	"LightningBolt",
+	"LightningExplosion",
+	"LightningSparks",
+]
+
+[[classOrder]]
+section = "React Hooks"
+classes = ["Hooks"]
+
+[home]
+enabled = true
+includeReadme = false
+
+[[home.features]]
+title = "Component-based"
+description = "Paired Server/Client components drive every entity, registered through the in-repo Component system."
+
+[[home.features]]
+title = "Typed networking"
+description = "All client/server traffic flows through one typed Network module — never raw RemoteEvents."
+
+[[home.features]]
+title = "Replicated state"
+description = "Per-instance state replicates server to client through the shared AttributeReplicator."
+
+[[home.features]]
+title = "Documented inline"
+description = "Shared utilities, services, and controllers carry Moonwave docs generated straight from the source."
+
+[docusaurus]
+projectName = "template"
+organizationName = "your-org"
+title = "Template"
+tagline = "API documentation"
+url = "https://your-org.github.io"
+baseUrl = "/template/"

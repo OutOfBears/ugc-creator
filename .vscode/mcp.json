@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "Roblox Studio-Windows": {
+      "type": "stdio",
+      "command": "cmd.exe",
+      "args": ["/c", "%LOCALAPPDATA%\\Roblox\\mcp.bat"]
+    },
+    "Roblox Studio-macOS": {
+      "type": "stdio",
+      "command": "/Applications/RobloxStudio.app/Contents/MacOS/StudioMCP"
+    }
+  },
+  "inputs": []
+}

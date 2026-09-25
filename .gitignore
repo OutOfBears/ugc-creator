@@ -1,0 +1,23 @@
+.DS_Store
+
+# Project place file
+/Packages
+/ServerPackages
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+
+Scripts.rbxl
+Game.rbxl
+
+sourcemap.json
+*.sourcemap.json
+# luau-lsp local Roblox type cache (machine-generated)
+.luau-lsp/globalTypes.d.luau
+.luau-lsp/api-docs.json
+
+# Moonwave / Docusaurus docs build
+/build
+/node_modules
+.docusaurus

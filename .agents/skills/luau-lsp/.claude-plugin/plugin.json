@@ -1,0 +1,23 @@
+{
+  "name": "luau-lsp",
+  "description": "Roblox Luau language server (JohnnyMorganz/luau-lsp) for code navigation — go-to-definition, find-references, document/workspace symbols, hover. Diagnostics are off (use /check for lint/type gating).",
+  "version": "1.0.0",
+  "lspServers": {
+    "luau": {
+      "command": "luau-lsp",
+      "args": [
+        "lsp",
+        "--stdio",
+        "--base-luaurc=.luaurc",
+        "--definitions=.luau-lsp/globalTypes.d.luau",
+        "--documentation=.luau-lsp/api-docs.json",
+        "--settings=.luau-lsp/settings.json"
+      ],
+      "extensionToLanguage": {
+        ".luau": "luau",
+        ".lua": "luau"
+      },
+      "diagnostics": false
+    }
+  }
+}

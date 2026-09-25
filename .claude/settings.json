@@ -1,0 +1,22 @@
+{
+  "env": {
+    "ENABLE_LSP_TOOL": "1"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "permissions": {
+    "allow": [
+      "Bash(stylua *)",
+      "Bash(selene *)",
+      "Bash(luau-lsp analyze *)",
+      "Bash(rojo build *)",
+      "Bash(rojo sourcemap *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ]
+  }
+}
