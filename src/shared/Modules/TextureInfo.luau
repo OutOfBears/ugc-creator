@@ -42,6 +42,7 @@ export type Region = {
 	meshPartNames: { string },
 
 	regionBuffer: buffer?,
+	regionSize: Vector2?,
 	regionColor: RegionMaps.ColorUInt8?,
 }
 
@@ -393,8 +394,11 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		return newModelInfo
 	end
 
-	local function getAllRegionBuffers(sourceRegionMap: RegionMaps.RegionMap): { [string]: buffer }
+	local function getAllRegionBuffers(
+		sourceRegionMap: RegionMaps.RegionMap
+	): ({ [string]: buffer }, { [string]: Vector2 })
 		local allRegionBuffers = {}
+		local allRegionSizes = {}
 
 		for _, region: RegionMaps.Region in pairs(sourceRegionMap) do
 			if region.regionTextureId then
@@ -414,12 +418,13 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 					allRegionBuffers[region.regionTextureId] =
 						editableImage:ReadPixelsBuffer(Vector2.zero, editableImage.Size)
+					allRegionSizes[region.regionTextureId] = editableImage.Size
 					editableImage:Destroy()
 				end
 			end
 		end
 
-		return allRegionBuffers
+		return allRegionBuffers, allRegionSizes
 	end
 
 	local function setupRegionMap(): RegionMap
@@ -429,13 +434,14 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 		local newRegionMap: RegionMap = {}
 
-		local allRegionBuffers = getAllRegionBuffers(blankData.regionMapSubParts)
+		local allRegionBuffers, allRegionSizes = getAllRegionBuffers(blankData.regionMapSubParts)
 
 		for regionName, sourceRegion: RegionMaps.Region in pairs(blankData.regionMapSubParts) do
 			local newRegion: Region = {
 				name = regionName,
 				meshPartNames = sourceRegion.meshPartNames,
 				regionBuffer = allRegionBuffers[sourceRegion.regionTextureId],
+				regionSize = allRegionSizes[sourceRegion.regionTextureId],
 				regionColor = sourceRegion.regionColor,
 			}
 
@@ -447,6 +453,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 	local function setupMeshPartToRegionMap(regionMap: RegionMaps.RegionMap): RegionMap
 		local allSubRegionBuffers = {}
+		local allSubRegionSizes = {}
 
 		local meshPartToRegionMap: RegionMap = {}
 		for meshPartName, regionData in pairs(regionMap) do
@@ -462,6 +469,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 					end
 					allSubRegionBuffers[regionData.regionTextureId] =
 						editableImage:ReadPixelsBuffer(Vector2.zero, editableImage.Size)
+					allSubRegionSizes[regionData.regionTextureId] = editableImage.Size
 					editableImage:Destroy()
 				end
 
@@ -469,6 +477,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 					name = meshPartName,
 					meshPartNames = meshPartName :: any,
 					regionBuffer = allSubRegionBuffers[regionData.regionTextureId],
+					regionSize = allSubRegionSizes[regionData.regionTextureId],
 					regionColor = regionData.regionColor,
 				}
 

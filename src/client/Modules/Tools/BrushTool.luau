@@ -31,6 +31,7 @@ export type BrushTool = {
 	currentState: number,
 	currentBrush: any,
 	useProjectionBrush: boolean,
+	isLinearOverride: boolean,
 	lastVirtualCursorUpdate: number,
 	lastDrawnMeshPart: MeshPart?,
 	brushInputGui: ScreenGui,
@@ -50,7 +51,10 @@ export type BrushTool = {
 	enable: (self: BrushTool) -> (),
 	disable: (self: BrushTool) -> (),
 	clearAll: (self: BrushTool) -> (),
-	createNewBrush: (self: BrushTool, meshPart: MeshPart) -> (),
+	createNewBrush: (self: BrushTool, meshPart: MeshPart, forceLinearBrush: boolean?) -> (),
+	beginStroke: (self: BrushTool, meshPart: MeshPart, drawInfo: Brushes.DrawInfo, forceLinearBrush: boolean?) -> (),
+	continueStroke: (self: BrushTool, meshPart: MeshPart, drawInfo: Brushes.DrawInfo) -> (),
+	endStroke: (self: BrushTool) -> (),
 	castRayFromCamera: (self: BrushTool, inputPosition: Vector2) -> (boolean, MeshUtils.EditableMeshRaycastResult?),
 	setupMeshDraw: (self: BrushTool) -> (),
 	handleInputChanged: (self: BrushTool, inputPosition: Vector2, isVirtualCursorMovement: boolean) -> (),
@@ -84,6 +88,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 	object.currentBrush = nil
 
 	object.useProjectionBrush = CreationConfig.projectionEnabled
+	object.isLinearOverride = false
 
 	object.lastVirtualCursorUpdate = 0
 	object.maid = maid
@@ -220,11 +225,12 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 	--[=[
 		@within BrushTool
 		@param meshPart MeshPart -- the part the next stroke starts on
+		@param forceLinearBrush boolean? -- paint in texture space even when projection is enabled
 
 		Builds the brush for a stroke, wired to commit each finished segment both locally and to
 		the server.
 	]=]
-	function object:createNewBrush(meshPart: MeshPart)
+	function object:createNewBrush(meshPart: MeshPart, forceLinearBrush: boolean?)
 		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 		local brushLayer, _wasCreated = textureInfo:getOrCreateLayer(meshPart, CreationConfig.layerNames.brush)
 		local pbrMaps = {
@@ -238,8 +244,11 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 		end
 
 		self.currentBrush = nil
+		self.isLinearOverride = forceLinearBrush == true
 
-		if self.useProjectionBrush then
+		local useProjectionBrush = self.useProjectionBrush and not self.isLinearOverride
+
+		if useProjectionBrush then
 			self.currentBrush = Brushes.ProjectionBrush(brushLayer, textureInfo, pbrMaps)
 			self.currentBrush:setCommitBrushStrokeCallback(
 				function(projectionBrushActionMetadata: ImageEditActions.ProjectionBrushActionMetadata)
@@ -277,7 +286,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 		local currentColor = self.currentState == CreationConfig.paintStates.erasing and Color3.new(0, 0, 0)
 			or self.currentBrushColor
 		local currentTransparency = self.currentState == CreationConfig.paintStates.erasing and 1.0 or 0.0
-		if self.useProjectionBrush then
+		if useProjectionBrush then
 			-- TODO CLI-202002: implement non-opaque transparency support for linear brush
 			currentTransparency = self.currentBrushTransparency
 		end
@@ -394,27 +403,13 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 
 			local drawPosition = Vector2.new(math.floor(drawX), math.floor(drawY))
 
-			if
-				not self.currentBrush
-				or (
-					self.lastDrawnMeshPart ~= raycastResult.meshPart
-					and not textureInfo:meshPartsShareLayer(self.lastDrawnMeshPart, raycastResult.meshPart)
-				)
-			then
-				self:createNewBrush(raycastResult.meshPart)
-			end
-
-			self.lastDrawnMeshPart = raycastResult.meshPart
-
 			local drawInfo: Brushes.DrawInfo = {
 				textureDrawPosition = drawPosition,
 				cameraCFrame = workspace.CurrentCamera.CFrame,
 				castedPoint = raycastResult.meshPart.CFrame:PointToWorldSpace(raycastResult.point),
 				isVirtualCursorMovement = false,
 			}
-			self.currentBrush:penDown(drawInfo)
-
-			textureInfo:updateOutputColorMap(raycastResult.meshPart)
+			self:beginStroke(raycastResult.meshPart, drawInfo)
 		end))
 
 		maid:add(UserInputService.InputChanged:Connect(function(input, gameProcessedEvent)
@@ -474,6 +469,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 				return
 			end
 
+			local wasPenDown = penDown
 			penDown = false
 
 			if usingVirtualCursor then
@@ -487,12 +483,84 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 				end
 			end
 
-			if self.currentBrush then
-				self.currentBrush:penUp(Vector2.new())
-				self.currentBrush:destroy()
-				self.currentBrush = nil
+			if wasPenDown then
+				self:endStroke()
 			end
 		end))
+	end
+
+	--[=[
+		@within BrushTool
+		@param meshPart MeshPart -- the part whose layer the stroke paints
+		@param drawInfo Brushes.DrawInfo -- where the stroke starts
+		@param forceLinearBrush boolean? -- paint in texture space, as the 2D canvas does
+
+		Starts a stroke at a texture position, reusing the current brush when it already targets
+		the same layer.
+	]=]
+	function object:beginStroke(meshPart: MeshPart, drawInfo: Brushes.DrawInfo, forceLinearBrush: boolean?)
+		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
+
+		if
+			not self.currentBrush
+			or self.isLinearOverride ~= (forceLinearBrush == true)
+			or (
+				self.lastDrawnMeshPart ~= meshPart
+				and not textureInfo:meshPartsShareLayer(self.lastDrawnMeshPart, meshPart)
+			)
+		then
+			self:createNewBrush(meshPart, forceLinearBrush)
+		end
+
+		self.lastDrawnMeshPart = meshPart
+
+		self.currentBrush:penDown(drawInfo)
+
+		textureInfo:updateOutputColorMap(meshPart)
+	end
+
+	--[=[
+		@within BrushTool
+		@param meshPart MeshPart -- the part under the pen now
+		@param drawInfo Brushes.DrawInfo -- where the pen moved to
+
+		Extends the active stroke, restarting the brush when the pen crosses onto another part that
+		shares the same layer so its region stencil stays correct.
+	]=]
+	function object:continueStroke(meshPart: MeshPart, drawInfo: Brushes.DrawInfo)
+		if not self.currentBrush then
+			return
+		end
+
+		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
+
+		if self.lastDrawnMeshPart ~= meshPart and textureInfo:meshPartsShareLayer(self.lastDrawnMeshPart, meshPart) then
+			self.currentBrush:penUp()
+			self:createNewBrush(meshPart, self.isLinearOverride)
+
+			self.currentBrush:penDown(drawInfo)
+		else
+			self.currentBrush:movePen(drawInfo)
+		end
+
+		self.lastDrawnMeshPart = meshPart
+
+		textureInfo:updateOutputColorMap(meshPart)
+	end
+
+	--[=[
+		@within BrushTool
+
+		Commits and tears down the active stroke. Safe to call when no stroke is active.
+	]=]
+	function object:endStroke()
+		if not self.currentBrush then
+			return
+		end
+
+		self.currentBrush:penUp()
+		self.currentBrush:destroy()
+		self.currentBrush = nil
 	end
 
 	--[=[
@@ -527,21 +595,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 			isVirtualCursorMovement = isVirtualCursorMovement,
 		}
 
-		if
-			self.lastDrawnMeshPart ~= raycastResult.meshPart
-			and textureInfo:meshPartsShareLayer(self.lastDrawnMeshPart, raycastResult.meshPart)
-		then
-			self.currentBrush:penUp()
-			self:createNewBrush(raycastResult.meshPart)
-
-			self.currentBrush:penDown(drawInfo)
-		else
-			self.currentBrush:movePen(drawInfo)
-		end
-
-		self.lastDrawnMeshPart = raycastResult.meshPart
-
-		textureInfo:updateOutputColorMap(raycastResult.meshPart)
+		self:continueStroke(raycastResult.meshPart, drawInfo)
 	end
 
 	function object:destroy()

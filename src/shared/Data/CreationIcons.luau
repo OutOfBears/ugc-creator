@@ -30,6 +30,7 @@ local creationIcons: CreationIcons = {
 		Decal = "rbxassetid://110475569250921",
 		Pattern = "rbxassetid://107153084986708",
 		Kitbashing = "rbxassetid://135744896670779",
+		UVCanvas = "rbxassetid://107153084986708",
 
 		PaintbrushMuted = "rbxassetid://114632118377883",
 		EraserMuted = "rbxassetid://110165308214781",

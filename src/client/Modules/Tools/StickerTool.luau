@@ -38,10 +38,12 @@ export type StickerData = {
 
 	targetMeshPart: MeshPart,
 
-	positionMarker: Part,
-	positionMarkerOffset: CFrame,
+	positionMarker: Part?,
+	positionMarkerOffset: CFrame?,
 
 	stickerLayerNumber: number,
+
+	isTextureSpace: boolean?,
 }
 
 export type StickerTool = {
@@ -59,6 +61,8 @@ export type StickerTool = {
 	useProjectionSticker: boolean,
 	appliedStickers: { StickerData },
 	stickerCounter: number,
+	canvasPlacementMeshPart: MeshPart?,
+	canvasPlacementPosition: Vector2?,
 	mouseDownPos: Vector2?,
 	inputGui: ScreenGui,
 	uiHandles: EditHandle.EditHandle,
@@ -75,6 +79,7 @@ export type StickerTool = {
 	refreshHandleUI: (self: StickerTool) -> (),
 	allocateLayer: (self: StickerTool) -> number?,
 	applySticker: (self: StickerTool, imageAssetId: string) -> (),
+	placeSticker: (self: StickerTool, stickerData: StickerData) -> (),
 	redrawSticker: (self: StickerTool, stickerData: StickerData, shouldFireServer: boolean) -> (),
 	onPatternPaddingChanged: (self: StickerTool, newPadding: number, isFinalInput: boolean) -> (),
 	deleteCurrentSticker: (self: StickerTool) -> (),
@@ -83,6 +88,11 @@ export type StickerTool = {
 	safelyRedrawSticker: (self: StickerTool) -> (),
 	isPatterned: (self: StickerTool) -> boolean,
 	hasAppliedStickers: (self: StickerTool) -> boolean,
+	setCanvasPlacement: (self: StickerTool, meshPart: MeshPart?, texturePosition: Vector2?) -> (),
+	getSelectedSticker: (self: StickerTool) -> StickerData?,
+	moveSelectedStickerTo: (self: StickerTool, meshPart: MeshPart, texturePosition: Vector2) -> (),
+	setSelectedStickerTransform: (self: StickerTool, rotation: number?, scale: number?) -> (),
+	commitStickerEdit: (self: StickerTool) -> (),
 	enable: (self: StickerTool) -> (),
 	disable: (self: StickerTool) -> (),
 	destroy: (self: StickerTool) -> (),
@@ -239,17 +249,22 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 		@param stickerData StickerData? -- the sticker whose marker moved with the model
 	]=]
 	function object:refreshMarkerPosition(stickerData: StickerData?)
-		if stickerData then
-			stickerData.positionMarker.CFrame =
-				stickerData.targetMeshPart.CFrame:ToWorldSpace(stickerData.positionMarkerOffset)
-
-			local directionIndicator = stickerData.positionMarker:FindFirstChild("StickerDirectionMarker")
-			if directionIndicator then
-				directionIndicator.Position = stickerData.positionMarker.Position + stickerData.projectionDirection
-			end
-
-			self:refreshHandleUI()
+		if not stickerData then
+			return
 		end
+
+		local marker = stickerData.positionMarker
+		local markerOffset = stickerData.positionMarkerOffset
+		if marker and markerOffset then
+			marker.CFrame = stickerData.targetMeshPart.CFrame:ToWorldSpace(markerOffset)
+
+			local directionIndicator = marker:FindFirstChild("StickerDirectionMarker")
+			if directionIndicator then
+				directionIndicator.Position = marker.Position + stickerData.projectionDirection
+			end
+		end
+
+		self:refreshHandleUI()
 	end
 
 	--[=[
@@ -385,6 +400,11 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 			return
 		end
 
+		local marker = selectedSticker.positionMarker
+		if not marker then
+			return
+		end
+
 		local meshPart = selectedSticker.targetMeshPart
 
 		local meshInfo: MeshInfo.MeshInfo = self.modelInfo:getMeshInfo()
@@ -400,18 +420,18 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 			self:moveStickerBetweenParts(selectedSticker, raycastResult.meshPart)
 		end
 
-		selectedSticker.positionMarker.CFrame = MeshUtils.editableMeshRaycastToCFrame(
+		marker.CFrame = MeshUtils.editableMeshRaycastToCFrame(
 			raycastResult.editableMesh,
 			raycastResult.meshPart,
 			raycastResult.point,
 			raycastResult.triangleId,
 			raycastResult.scaleFactor
 		)
-		selectedSticker.positionMarkerOffset = meshPart.CFrame:ToObjectSpace(selectedSticker.positionMarker.CFrame)
+		selectedSticker.positionMarkerOffset = meshPart.CFrame:ToObjectSpace(marker.CFrame)
 
-		local directionIndicator = selectedSticker.positionMarker:FindFirstChild("StickerDirectionMarker")
+		local directionIndicator = marker:FindFirstChild("StickerDirectionMarker")
 		if directionIndicator then
-			directionIndicator.Position = selectedSticker.positionMarker.Position + selectedSticker.projectionDirection
+			directionIndicator.Position = marker.Position + selectedSticker.projectionDirection
 		end
 
 		local uvCoord = MeshUtils.getTextureCoordinate(
@@ -444,12 +464,17 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 			return
 		end
 
+		local marker = selectedSticker.positionMarker
+		if not marker then
+			return
+		end
+
 		local camera = workspace.CurrentCamera
 		local rayOrigin = camera.CFrame.Position
 		local inputPosition = ToolInput.getInputPosition(input)
 		local ray = camera:ScreenPointToRay(inputPosition.X, inputPosition.Y, 1)
-		local planePoint = selectedSticker.positionMarker.Position
-		local planeNormal = selectedSticker.positionMarker.CFrame.LookVector
+		local planePoint = marker.Position
+		local planeNormal = marker.CFrame.LookVector
 		planeNormal = planeNormal.Unit
 		local isIntersecting, intersection = getRayPlaneIntersection(rayOrigin, ray.Direction, planePoint, planeNormal)
 
@@ -460,11 +485,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 		local vectorDiff = intersection - planePoint
 		vectorDiff = vectorDiff.Unit
-		local upVector = rotateVectorAroundAxis(
-			selectedSticker.positionMarker.CFrame.UpVector,
-			selectedSticker.rotation,
-			planeNormal
-		)
+		local upVector = rotateVectorAroundAxis(marker.CFrame.UpVector, selectedSticker.rotation, planeNormal)
 		local upDot = upVector:Dot(vectorDiff)
 		local cross = upVector:Cross(vectorDiff)
 
@@ -533,7 +554,13 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 		end
 
 		local selectedSticker: StickerData = self.appliedStickers[self.currentlySelectedSticker]
-		local stickerPos3d = selectedSticker.positionMarker.Position
+		local marker = selectedSticker.positionMarker
+		if not marker then
+			self.inputGui.Enabled = false
+			return
+		end
+
+		local stickerPos3d = marker.Position
 		local camera = workspace.CurrentCamera
 
 		local moveHandlePos = camera:WorldToScreenPoint(stickerPos3d)
@@ -577,6 +604,29 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 		local layerNumber = self:allocateLayer()
 		if not layerNumber then
+			return
+		end
+
+		local canvasMeshPart = self.canvasPlacementMeshPart
+		local canvasPosition = self.canvasPlacementPosition
+		if canvasMeshPart and canvasPosition then
+			self:placeSticker({
+				textureId = imageAssetId,
+				projectionDirection = Vector3.zero,
+
+				texturePosition = canvasPosition,
+				rotation = 0,
+				scale = if self.isAccessory then CreationConfig.accessoryStickerScale else 1,
+
+				isTiled = false,
+				tilePadding = 0,
+
+				targetMeshPart = canvasMeshPart,
+
+				stickerLayerNumber = layerNumber,
+
+				isTextureSpace = true,
+			})
 			return
 		end
 
@@ -634,6 +684,17 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 			stickerLayerNumber = layerNumber,
 		}
 
+		self:placeSticker(stickerData)
+	end
+
+	--[=[
+		@within StickerTool
+		@private
+		@param stickerData StickerData -- a fully built sticker that has not been drawn yet
+
+		Adds a new sticker to the applied list, draws it and selects it.
+	]=]
+	function object:placeSticker(stickerData: StickerData)
 		self.stickerCounter = self.stickerCounter + 1
 
 		self.appliedStickers[#self.appliedStickers + 1] = stickerData
@@ -684,7 +745,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 			local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 			textureInfo:updateOutputColorMap(stickerData.targetMeshPart)
-		elseif self.useProjectionSticker then
+		elseif self.useProjectionSticker and stickerData.positionMarker then
 			local drawTextureSet = {}
 			local projectorCFrame = stickerData.positionMarker.CFrame
 			local projectorBrushSize = Vector3.new(0.5, 0.5, 0.5) * stickerData.scale
@@ -808,7 +869,9 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 		self.stickerCounter = self.stickerCounter - 1
 		self:refreshHandleUI()
 
-		selectedSticker.positionMarker:Destroy()
+		if selectedSticker.positionMarker then
+			selectedSticker.positionMarker:Destroy()
+		end
 	end
 
 	--[=[
@@ -870,6 +933,80 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 	]=]
 	function object:hasAppliedStickers(): boolean
 		return #self.appliedStickers > 0
+	end
+
+	--[=[
+		@within StickerTool
+		@param meshPart MeshPart? -- the part new stickers land on, or nil to place them in 3D again
+		@param texturePosition Vector2? -- texel new stickers are centred on
+
+		While set, [StickerTool:applySticker] places flat texture-space stickers here instead of
+		projecting onto the surface nearest the camera. The 2D canvas keeps this at its view centre.
+	]=]
+	function object:setCanvasPlacement(meshPart: MeshPart?, texturePosition: Vector2?)
+		self.canvasPlacementMeshPart = meshPart
+		self.canvasPlacementPosition = texturePosition
+	end
+
+	--[=[
+		@within StickerTool
+		@return StickerData? -- the selected sticker, or nil when none is selected
+	]=]
+	function object:getSelectedSticker(): StickerData?
+		return self.appliedStickers[self.currentlySelectedSticker]
+	end
+
+	--[=[
+		@within StickerTool
+		@param meshPart MeshPart -- the part under the new position
+		@param texturePosition Vector2 -- the texel to centre the sticker on
+
+		Moves the selected sticker in texture space. The action is held until
+		[StickerTool:commitStickerEdit] so a drag only replicates once.
+	]=]
+	function object:moveSelectedStickerTo(meshPart: MeshPart, texturePosition: Vector2)
+		local selectedSticker = self:getSelectedSticker()
+		if not selectedSticker then
+			return
+		end
+
+		if selectedSticker.targetMeshPart ~= meshPart then
+			self:moveStickerBetweenParts(selectedSticker, meshPart)
+		end
+
+		selectedSticker.texturePosition = texturePosition
+		self:redrawSticker(selectedSticker, false)
+	end
+
+	--[=[
+		@within StickerTool
+		@param rotation number? -- new rotation in degrees, or nil to keep it
+		@param scale number? -- new scale, or nil to keep it
+
+		Held until [StickerTool:commitStickerEdit], like a move.
+	]=]
+	function object:setSelectedStickerTransform(rotation: number?, scale: number?)
+		local selectedSticker = self:getSelectedSticker()
+		if not selectedSticker then
+			return
+		end
+
+		selectedSticker.rotation = rotation or selectedSticker.rotation
+		selectedSticker.scale = math.max(scale or selectedSticker.scale, 0.1)
+		self:redrawSticker(selectedSticker, false)
+	end
+
+	--[=[
+		@within StickerTool
+
+		Sends the last held sticker edit to the server.
+	]=]
+	function object:commitStickerEdit()
+		if self.lastStickerAction ~= nil then
+			Network.fire("SubmitAction", self.lastStickerAction)
+		end
+
+		self.lastStickerAction = nil
 	end
 
 	--[=[

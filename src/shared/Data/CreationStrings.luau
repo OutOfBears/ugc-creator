@@ -13,6 +13,8 @@ export type CreationStrings = {
 	accessoryAdjustmentBody: string,
 
 	reflectivityToggle: string,
+	uvWireframeToggle: string,
+	uvCanvasResetView: string,
 
 	counters: { sticker: string, kitbash: string },
 }
@@ -40,6 +42,8 @@ local strings: CreationStrings = {
 	accessoryAdjustmentBody = "The accessory may not fit perfectly in the preview. You can adjust the fit using the Accessory Adjustment tool after purchase.",
 
 	reflectivityToggle = "Reflective Effect",
+	uvWireframeToggle = "UV Lines",
+	uvCanvasResetView = "Fit",
 
 	counters = {
 		sticker = "Stickers Applied",

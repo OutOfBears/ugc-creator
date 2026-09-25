@@ -7,6 +7,7 @@ local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationIcons = require(ReplicatedStorage.Shared.Data.CreationIcons)
 local EraserToolUI = require("./EraserToolUI")
 local FillToolUI = require("./FillToolUI")
+local IconButton = require("../Components/IconButton")
 local Kitbash = require(ReplicatedStorage.Shared.Data.Kitbash)
 local KitbashToolUI = require("./KitbashToolUI")
 local LayerColorToolUI = require("./LayerColorToolUI")
@@ -15,7 +16,9 @@ local StickerPatternToolUI = require("./StickerPatternToolUI")
 local StickerToolUI = require("./StickerToolUI")
 local Stickers = require(ReplicatedStorage.Shared.Data.Stickers)
 local StyleConsts = require("../Style/StyleConsts")
+local StyleUtils = require("../Style/StyleUtils")
 local Toolbar = require("../Components/Toolbar")
+local UVCanvasUI = require("./UVCanvasUI")
 
 local player = Players.LocalPlayer
 
@@ -40,6 +43,9 @@ export type EditingUI = {
 	stickerPatternToolUI: StickerPatternToolUI.StickerPatternToolUI,
 	kitbashToolUI: KitbashToolUI.KitbashToolUI,
 	layerColorToolUI: LayerColorToolUI.LayerColorToolUI?,
+	uvCanvasUI: UVCanvasUI.UVCanvasUI,
+	canvasButtonGroup: Frame,
+	isCanvasEnabled: boolean,
 	maid: Maid.Maid,
 	-- methods
 	show: (self: EditingUI) -> (),
@@ -111,7 +117,37 @@ local function EditingUI(
 		Parent = frame,
 	}) :: Frame
 
+	local canvasTarget: { panelFrame: Frame, mode: UVCanvasUI.UVCanvasMode }? = nil
+
+	local function refreshCanvas()
+		if not object.isCanvasEnabled or StyleUtils.getIsMobile(object.screenGui) then
+			if object.uvCanvasUI:isOpen() then
+				object.uvCanvasUI:close()
+				if canvasTarget then
+					object.session:panToLeft()
+				else
+					object.session:resetCamera()
+				end
+			end
+			return
+		end
+
+		local target = canvasTarget
+		if target then
+			object.uvCanvasUI:open(target.mode, target.panelFrame)
+		else
+			object.uvCanvasUI:open("view", nil)
+		end
+	end
+
+	local function attachCanvas(panelFrame: Frame, mode: UVCanvasUI.UVCanvasMode)
+		canvasTarget = { panelFrame = panelFrame, mode = mode }
+		refreshCanvas()
+	end
+
 	local function closeAndDisablePanels()
+		canvasTarget = nil
+
 		object.brushToolUI:close()
 		object.eraserToolUI:close()
 		object.brushTool:disable()
@@ -144,6 +180,7 @@ local function EditingUI(
 		object.toolbar:removeSelection()
 		object.session:resetCamera()
 		closeAndDisablePanels()
+		refreshCanvas()
 	end
 
 	local function createBrushToolUI()
@@ -269,9 +306,11 @@ local function EditingUI(
 
 		local sectionColorChanged = function(sectionName, color, opacity, isFinalInput)
 			object.layerColorTool:applySectionColor(sectionName, color, opacity, isFinalInput)
+			object.uvCanvasUI:refreshUnderlay()
 		end
 		local variantSelected = function(groupName, optionIndex)
 			object.layerColorTool:selectVariant(groupName, optionIndex)
+			object.uvCanvasUI:refreshUnderlay()
 		end
 		local deleteCallback = function() end
 
@@ -343,6 +382,7 @@ local function EditingUI(
 		closeAndDisablePanels()
 		object.baseUI:unhideCoreUIBehindPanel()
 		object.session:showMeshEditControls(widgetControlName)
+		refreshCanvas()
 	end
 
 	local function getMeshEditingGroup()
@@ -378,6 +418,7 @@ local function EditingUI(
 					object.brushToolUI:open()
 					object.brushTool:enable()
 					object.session:panToLeft()
+					attachCanvas(object.brushToolUI.panel.frame, "paint")
 				end,
 			},
 			{
@@ -389,6 +430,7 @@ local function EditingUI(
 					object.eraserToolUI:open()
 					object.brushTool:enable()
 					object.session:panToLeft()
+					attachCanvas(object.eraserToolUI.panel.frame, "paint")
 				end,
 			},
 		}
@@ -400,6 +442,7 @@ local function EditingUI(
 					onOpenPanel()
 					object.fillToolUI:open()
 					object.session:panToLeft()
+					attachCanvas(object.fillToolUI.panel.frame, "view")
 				end,
 			},
 		}
@@ -411,6 +454,7 @@ local function EditingUI(
 					onOpenPanel()
 					object.layerColorToolUI:open()
 					object.session:panToLeft()
+					attachCanvas(object.layerColorToolUI.panel.frame, "view")
 				end,
 			},
 		}
@@ -424,6 +468,7 @@ local function EditingUI(
 					object.stickerTool:enable()
 					object.stickerToolUI:open()
 					object.session:panToLeft()
+					attachCanvas(object.stickerToolUI.panel.frame, "sticker")
 				end,
 			},
 		}
@@ -435,6 +480,7 @@ local function EditingUI(
 					onOpenPanel()
 					object.stickerPatternToolUI:open()
 					object.stickerTool:enable()
+					attachCanvas(object.stickerPatternToolUI.panel.frame, "view")
 				end,
 			}
 			table.insert(stickerGroup, patternsButton)
@@ -448,6 +494,7 @@ local function EditingUI(
 					object.kitbashToolUI:open()
 					object.kitbashTool:enable()
 					object.session:panToLeft()
+					attachCanvas(object.kitbashToolUI.panel.frame, "view")
 				end,
 			},
 		}
@@ -470,6 +517,43 @@ local function EditingUI(
 		object.toolbar = maid:add(Toolbar(toolbarGroups, onClosePanel))
 	end
 
+	local function setupCanvasToolbarButton()
+		local buttonGroup = Create("Frame", {
+			Name = "UVCanvasButtonGroup",
+			LayoutOrder = #object.toolbar.buttonGroups + 1,
+			Tags = { StyleConsts.tags.ToolbarButtonGroup },
+			Parent = object.toolbar:getFrame(),
+		}) :: Frame
+
+		local canvasButton = IconButton(CreationIcons.icons.UVCanvas, function()
+			object.isCanvasEnabled = not object.isCanvasEnabled
+
+			if object.isCanvasEnabled then
+				StyleUtils.addStyleTag(buttonGroup, StyleConsts.tags.ButtonSelected)
+			else
+				StyleUtils.removeStyleTag(buttonGroup, StyleConsts.tags.ButtonSelected)
+			end
+
+			refreshCanvas()
+		end)
+		StyleUtils.addStyleTag(canvasButton, StyleConsts.tags.ToolbarButton)
+		canvasButton.Parent = buttonGroup
+
+		local function refreshVisibility()
+			buttonGroup.Visible = not StyleUtils.getIsMobile(object.screenGui)
+		end
+
+		maid:add(object.screenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(refreshVisibility))
+		refreshVisibility()
+
+		object.canvasButtonGroup = buttonGroup
+	end
+
+	object.isCanvasEnabled = false
+	object.uvCanvasUI =
+		maid:add(UVCanvasUI(session, session.modelInfo, object.creationInput, object.brushTool, object.stickerTool))
+	object.uvCanvasUI.container.Parent = object.screenGui
+
 	createBrushToolUI()
 	createEraserToolUI()
 	if hasLayerCatalog then
@@ -482,6 +566,7 @@ local function EditingUI(
 	createKitbashToolUI()
 
 	setupToolbar()
+	setupCanvasToolbarButton()
 	object.toolbar:getFrame().Parent = toolbarParent
 
 	--[=[
@@ -491,6 +576,7 @@ local function EditingUI(
 	]=]
 	function object:hide()
 		closeAndDisablePanels()
+		self.uvCanvasUI:close()
 		self.baseUI:unhideCoreUIBehindPanel()
 		self.toolbar:removeSelection()
 		self.screenGui.Enabled = false
@@ -501,6 +587,7 @@ local function EditingUI(
 	]=]
 	function object:show()
 		self.screenGui.Enabled = true
+		refreshCanvas()
 	end
 
 	function object:destroy()

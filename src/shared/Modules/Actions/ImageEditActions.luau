@@ -479,7 +479,13 @@ ImageEditActions.LinearBrushAction = {
 		local textureInfo = modelInfo:getTextureInfo()
 		local brushLayer: EditableImage = textureInfo:getOrCreateLayer(targetMeshPart, CreationConfig.layerNames.brush)
 
-		local prevBrushBuffer = brushLayer:ReadPixelsBuffer(Vector2.zero, brushLayer.Size)
+		local rectPosition, rectSize =
+			TextureUtils.getStrokeRect(actionMetaData.drawPositions, actionMetaData.brushSize, brushLayer.Size)
+		if rectSize.X <= 0 or rectSize.Y <= 0 then
+			return
+		end
+
+		local prevBrushBuffer = brushLayer:ReadPixelsBuffer(rectPosition, rectSize)
 
 		local prevDrawPosition = #actionMetaData.drawPositions > 0 and actionMetaData.drawPositions[1] or nil
 		for _, drawPosition in pairs(actionMetaData.drawPositions) do
@@ -495,7 +501,7 @@ ImageEditActions.LinearBrushAction = {
 		end
 
 		local currentRegionMap = textureInfo:getMeshPartRegion(actionMetaData.targetMeshPartName)
-		TextureUtils.performRegionStencil(currentRegionMap, prevBrushBuffer, brushLayer)
+		TextureUtils.performRegionStencil(currentRegionMap, prevBrushBuffer, brushLayer, rectPosition, rectSize)
 	end,
 }
 

@@ -7,6 +7,7 @@ type DrawInfo = {
 	cameraCFrame: CFrame,
 	castedPoint: Vector3,
 	isVirtualCursorMovement: boolean,
+	alwaysConnect: boolean?,
 }
 
 export type LinearBrush = {
@@ -31,6 +32,8 @@ export type LinearBrush = {
 	setColorBlendType: (self: LinearBrush, colorBlendType: Enum.ImageCombineType) -> (),
 	setAlphaBlendType: (self: LinearBrush, alphaBlendType: Enum.ImageAlphaType) -> (),
 	setAllMeshPart: (self: LinearBrush, allMeshPart: { [MeshPart]: EditableMesh }) -> (),
+	setIsReflective: (self: LinearBrush, isReflectiveMode: boolean) -> (),
+	setState: (self: LinearBrush, state: number) -> (),
 	setCommitBrushStrokeCallback: (
 		self: LinearBrush,
 		callback: (ImageEditActions.LinearBrushActionMetadata) -> ()
@@ -123,6 +126,22 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 
 	--[=[
 		@within LinearBrush
+		@param isReflectiveMode boolean -- recorded only, this brush does not write the PBR maps
+	]=]
+	function object:setIsReflective(isReflectiveMode: boolean)
+		self.isReflectiveMode = isReflectiveMode
+	end
+
+	--[=[
+		@within LinearBrush
+		@param state number -- a `CreationConfig.paintStates` value
+	]=]
+	function object:setState(state: number)
+		self.currentState = state
+	end
+
+	--[=[
+		@within LinearBrush
 		@param callback (ImageEditActions.LinearBrushActionMetadata) -> () -- receives each finished stroke so it can be turned into an action
 	]=]
 	function object:setCommitBrushStrokeCallback(callback: (ImageEditActions.LinearBrushActionMetadata) -> ())
@@ -153,7 +172,17 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 
 		local meshPart = assert(self.meshPart, "LinearBrush has no current MeshPart")
 		local currentRegionMap = self.textureInfo:getMeshPartRegion(meshPart.Name)
-		local prevBrushBuffer = self.targetEditableImage:ReadPixelsBuffer(Vector2.zero, self.targetEditableImage.Size)
+		local rectPosition, rectSize = TextureUtils.getStrokeRect(
+			{ self.lastPenPosition, newPosition },
+			self.penSize,
+			self.targetEditableImage.Size
+		)
+		local prevBrushBuffer = if currentRegionMap
+				and rectSize.X > 0
+				and rectSize.Y > 0
+			then self.targetEditableImage:ReadPixelsBuffer(rectPosition, rectSize)
+			else nil
+
 		TextureUtils.drawCircleBetweenPoints(
 			self.lastPenPosition,
 			newPosition,
@@ -162,7 +191,18 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 			self.penTransparency,
 			self.targetEditableImage
 		)
-		TextureUtils.performRegionStencil(currentRegionMap, prevBrushBuffer, self.targetEditableImage)
+
+		if prevBrushBuffer then
+			TextureUtils.performRegionStencil(
+				currentRegionMap,
+				prevBrushBuffer,
+				self.targetEditableImage,
+				rectPosition,
+				rectSize
+			)
+		end
+
+		TextureUtils.bleedColorIntoTransparent(self.targetEditableImage, rectPosition, rectSize)
 
 		self.drawPositions[#self.drawPositions + 1] = newPosition
 		self.lastPenPosition = newPosition
@@ -192,7 +232,7 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 		end
 
 		local newPosition = drawInfo.textureDrawPosition
-		local alwaysConnect = drawInfo.isVirtualCursorMovement
+		local alwaysConnect = drawInfo.isVirtualCursorMovement or drawInfo.alwaysConnect == true
 		if not alwaysConnect and self.lastPenPosition and (self.lastPenPosition - newPosition).Magnitude > 50 then
 			-- Connecting the two positions would draw a long line across the texture, so finish
 			-- the old stroke and start a new one instead.

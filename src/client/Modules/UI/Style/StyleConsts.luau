@@ -55,6 +55,7 @@ local StyleConsts: StyleConsts = {
 		ToggleFrame = "ToggleFrame",
 		TogglePill = "TogglePill",
 		ToggleLabel = "ToggleLabel",
+		ToggleFrameLeft = "ToggleFrameLeft",
 
 		LocalMenu = "LocalMenu",
 		LocalMenuConsole = "LocalMenuConsole",
@@ -111,6 +112,13 @@ local StyleConsts: StyleConsts = {
 
 		CounterFrame = "CounterFrame",
 		CounterLabel = "CounterLabel",
+
+		UVCanvasContainer = "UVCanvasContainer",
+		UVCanvasHeader = "UVCanvasHeader",
+		UVCanvasHeaderButton = "UVCanvasHeaderButton",
+		UVCanvasResizeGrip = "UVCanvasResizeGrip",
+		UVCanvas = "UVCanvas",
+		UVCanvasCursor = "UVCanvasCursor",
 	},
 
 	regionOrdering = {

@@ -7,6 +7,7 @@ export type DrawInfo = {
 	cameraCFrame: CFrame,
 	castedPoint: Vector3,
 	isVirtualCursorMovement: boolean,
+	alwaysConnect: boolean?,
 }
 
 --[=[

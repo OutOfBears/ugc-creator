@@ -71,7 +71,19 @@ local function getInputPosition(input: InputObject)
 	end
 end
 
+--[=[
+	@within ToolInput
+	@param input InputObject -- the input to locate
+	@return Vector2 -- where the input is in the space `GuiObject.AbsolutePosition` uses, even inside an `IgnoreGuiInset` gui
+]=]
+local function getGuiPosition(input: InputObject): Vector2
+	local inputPosition = getInputPosition(input)
+
+	return Vector2.new(inputPosition.X, inputPosition.Y)
+end
+
 return {
+	getGuiPosition = getGuiPosition,
 	isVirtualCursor = isVirtualCursor,
 	isValidDraggingInput = isValidDraggingInput,
 	isValidSelectingInput = isValidSelectingInput,

@@ -157,46 +157,210 @@ end
 
 --[=[
 	@within TextureUtils
-	@param currentRegion TextureInfo.Region? -- the region to keep, or nil to keep everything
-	@param previousBuffer buffer -- pixels as they were before the edit
-	@param targetTexture EditableImage -- the layer that was just drawn on
+	@param colorA Color3 -- color of the top-left and bottom-right squares
+	@param colorB Color3 -- color of the other two squares
+	@return EditableImage? -- a 2x2 checker to tile with `ScaleType.Tile`, or nil when no image memory is left
+]=]
+local function createCheckerImage(colorA: Color3, colorB: Color3): EditableImage?
+	local ok, image = pcall(function()
+		return AssetService:CreateEditableImage({ Size = Vector2.new(2, 2) })
+	end)
+	if not ok or not image then
+		return nil
+	end
 
-	Rolls back every pixel the edit touched outside the region's mask color.
+	local pixels = buffer.create(16)
+	for index, color in { colorA, colorB, colorB, colorA } do
+		local offset = (index - 1) * 4
+		buffer.writeu8(pixels, offset, math.round(color.R * 255))
+		buffer.writeu8(pixels, offset + 1, math.round(color.G * 255))
+		buffer.writeu8(pixels, offset + 2, math.round(color.B * 255))
+		buffer.writeu8(pixels, offset + 3, 255)
+	end
+	image:WritePixelsBuffer(Vector2.zero, image.Size, pixels)
+
+	return image
+end
+
+--[=[
+	@within TextureUtils
+	@param editableImage EditableImage -- the image to fix up
+	@param rectPosition Vector2 -- top-left of the area that was just drawn
+	@param rectSize Vector2 -- size of that area
+
+	Copies painted colors one pixel out into the fully transparent pixels around them, leaving
+	alpha untouched. Transparent pixels are otherwise black, which a scaled-down (filtered) view
+	blends into the paint as a dark outline.
+]=]
+local function bleedColorIntoTransparent(editableImage: EditableImage, rectPosition: Vector2, rectSize: Vector2)
+	local width = rectSize.X
+	local height = rectSize.Y
+	if width <= 0 or height <= 0 then
+		return
+	end
+
+	local pixels = editableImage:ReadPixelsBuffer(rectPosition, rectSize)
+	local rowStride = width * 4
+	local changed = false
+
+	for y = 0, height - 1 do
+		for x = 0, width - 1 do
+			local i = (y * width + x) * 4
+			if buffer.readu8(pixels, i + 3) == 0 then
+				local source = nil
+				if x > 0 and buffer.readu8(pixels, i - 1) > 0 then
+					source = i - 4
+				elseif x < width - 1 and buffer.readu8(pixels, i + 7) > 0 then
+					source = i + 4
+				elseif y > 0 and buffer.readu8(pixels, i - rowStride + 3) > 0 then
+					source = i - rowStride
+				elseif y < height - 1 and buffer.readu8(pixels, i + rowStride + 3) > 0 then
+					source = i + rowStride
+				end
+
+				if source then
+					buffer.writeu8(pixels, i, buffer.readu8(pixels, source))
+					buffer.writeu8(pixels, i + 1, buffer.readu8(pixels, source + 1))
+					buffer.writeu8(pixels, i + 2, buffer.readu8(pixels, source + 2))
+					changed = true
+				end
+			end
+		end
+	end
+
+	if changed then
+		editableImage:WritePixelsBuffer(rectPosition, rectSize, pixels)
+	end
+end
+
+--[=[
+	@within TextureUtils
+	@param positions { Vector2 } -- the stroke's sample positions
+	@param radius number -- how far a stamp reaches past its sample position
+	@param imageSize Vector2 -- the image the stroke is drawn on
+	@return Vector2 -- top-left of the rect, clamped to the image
+	@return Vector2 -- size of the rect, zero when nothing lands on the image
+
+	Bounds the pixels a stroke can touch so reads, writes and stencils can skip the rest.
+]=]
+local function getStrokeRect(positions: { Vector2 }, radius: number, imageSize: Vector2): (Vector2, Vector2)
+	local reach = math.ceil(radius) + 1
+	local minX, minY = math.huge, math.huge
+	local maxX, maxY = -math.huge, -math.huge
+
+	for _, position in positions do
+		minX = math.min(minX, position.X)
+		minY = math.min(minY, position.Y)
+		maxX = math.max(maxX, position.X)
+		maxY = math.max(maxY, position.Y)
+	end
+
+	local left = math.clamp(math.floor(minX) - reach, 0, imageSize.X)
+	local top = math.clamp(math.floor(minY) - reach, 0, imageSize.Y)
+	local right = math.clamp(math.ceil(maxX) + reach, 0, imageSize.X)
+	local bottom = math.clamp(math.ceil(maxY) + reach, 0, imageSize.Y)
+
+	return Vector2.new(left, top), Vector2.new(math.max(right - left, 0), math.max(bottom - top, 0))
+end
+
+--[=[
+	@within TextureUtils
+	@param currentRegion TextureInfo.Region? -- the region to keep, or nil to keep everything
+	@param previousBuffer buffer -- pixels as they were before the edit, covering the same rect
+	@param targetTexture EditableImage -- the layer that was just drawn on
+	@param rectPosition Vector2? -- top-left of the edited rect, defaults to the image origin
+	@param rectSize Vector2? -- size of the edited rect, defaults to the whole image
+
+	Rolls back every pixel the edit touched outside the region's mask color. Target pixels beyond
+	the mask's own size (other kitbash atlas cells) are always rolled back.
 ]=]
 local function performRegionStencil(
 	currentRegion: TextureInfo.Region?,
 	previousBuffer: buffer,
-	targetTexture: EditableImage
+	targetTexture: EditableImage,
+	rectPosition: Vector2?,
+	rectSize: Vector2?
 )
 	if
-		currentRegion ~= nil
-		and currentRegion.regionBuffer ~= nil
-		and currentRegion.regionColor ~= nil
-		and previousBuffer ~= nil
-		and targetTexture ~= nil
+		currentRegion == nil
+		or currentRegion.regionBuffer == nil
+		or currentRegion.regionColor == nil
+		or currentRegion.regionSize == nil
+		or previousBuffer == nil
+		or targetTexture == nil
 	then
-		local currentBuffer = targetTexture:ReadPixelsBuffer(Vector2.zero, targetTexture.Size)
+		return
+	end
 
-		local regionBuffer = currentRegion.regionBuffer
-		local regionR255 = currentRegion.regionColor.r
-		local regionG255 = currentRegion.regionColor.g
-		local regionB255 = currentRegion.regionColor.b
+	local origin = rectPosition or Vector2.zero
+	local size = rectSize or targetTexture.Size
+	local currentBuffer = targetTexture:ReadPixelsBuffer(origin, size)
 
-		for i = 0, buffer.len(regionBuffer) - 1, 4 do
-			if
-				buffer.readu8(regionBuffer, i) == regionR255
-				and buffer.readu8(regionBuffer, i + 1) == regionG255
-				and buffer.readu8(regionBuffer, i + 2) == regionB255
-			then
-				buffer.writeu8(previousBuffer, i, buffer.readu8(currentBuffer, i))
-				buffer.writeu8(previousBuffer, i + 1, buffer.readu8(currentBuffer, i + 1))
-				buffer.writeu8(previousBuffer, i + 2, buffer.readu8(currentBuffer, i + 2))
-				buffer.writeu8(previousBuffer, i + 3, buffer.readu8(currentBuffer, i + 3))
-			end
+	local regionBuffer = currentRegion.regionBuffer
+	local regionWidth = currentRegion.regionSize.X
+	local regionHeight = currentRegion.regionSize.Y
+	local regionR255 = currentRegion.regionColor.r
+	local regionG255 = currentRegion.regionColor.g
+	local regionB255 = currentRegion.regionColor.b
+
+	local rectWidth = size.X
+	local originX = origin.X
+	local originY = origin.Y
+
+	for y = 0, size.Y - 1 do
+		local regionY = originY + y
+		if regionY >= regionHeight then
+			break
 		end
 
-		targetTexture:WritePixelsBuffer(Vector2.zero, targetTexture.Size, previousBuffer)
+		for x = 0, rectWidth - 1 do
+			local regionX = originX + x
+			if regionX >= regionWidth then
+				break
+			end
+
+			local regionIndex = (regionY * regionWidth + regionX) * 4
+			if
+				buffer.readu8(regionBuffer, regionIndex) == regionR255
+				and buffer.readu8(regionBuffer, regionIndex + 1) == regionG255
+				and buffer.readu8(regionBuffer, regionIndex + 2) == regionB255
+			then
+				local i = (y * rectWidth + x) * 4
+				buffer.writeu32(previousBuffer, i, buffer.readu32(currentBuffer, i))
+			end
+		end
 	end
+
+	targetTexture:WritePixelsBuffer(origin, size, previousBuffer)
+end
+
+--[=[
+	@within TextureUtils
+	@param region TextureInfo.Region -- the region whose mask to sample
+	@param pixel Vector2 -- texel on the region's layer
+	@return boolean -- true when the mask carries the region's color at that texel
+]=]
+local function regionContainsPixel(region: TextureInfo.Region, pixel: Vector2): boolean
+	local regionBuffer = region.regionBuffer
+	local regionColor = region.regionColor
+	local regionSize = region.regionSize
+	if regionBuffer == nil or regionColor == nil or regionSize == nil then
+		return false
+	end
+
+	local regionWidth = regionSize.X
+	local regionHeight = regionSize.Y
+	local x = math.floor(pixel.X)
+	local y = math.floor(pixel.Y)
+	if x < 0 or y < 0 or x >= regionWidth or y >= regionHeight then
+		return false
+	end
+
+	local index = (y * regionWidth + x) * 4
+
+	return buffer.readu8(regionBuffer, index) == regionColor.r
+		and buffer.readu8(regionBuffer, index + 1) == regionColor.g
+		and buffer.readu8(regionBuffer, index + 2) == regionColor.b
 end
 
 --[=[
@@ -821,9 +985,13 @@ local function writeBufferForLargerRegionMap(
 end
 
 return {
+	bleedColorIntoTransparent = bleedColorIntoTransparent,
 	clear = clear,
+	createCheckerImage = createCheckerImage,
 	drawCircleBetweenPoints = drawCircleBetweenPoints,
+	getStrokeRect = getStrokeRect,
 	performRegionStencil = performRegionStencil,
+	regionContainsPixel = regionContainsPixel,
 	applyAlpha = applyAlpha,
 	blitTintedAlphaOver = blitTintedAlphaOver,
 	getRoughnessMaps = getRoughnessMaps,

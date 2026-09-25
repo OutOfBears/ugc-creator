@@ -922,6 +922,13 @@ local HIGH_PRIORITY_RULE_MAP = {
 		Visible = false,
 	},
 
+	[`.{tags.ToggleFrameLeft}`] = {
+		Size = UDim2.fromScale(0, 0),
+	},
+	[`.{tags.ToggleFrameLeft}::UIListLayout`] = {
+		HorizontalAlignment = Enum.HorizontalAlignment.Left,
+	},
+
 	[`.{tags.EmphasisButton}`] = {
 		BackgroundColor3 = styleTokens.ActionEmphasis.Color3,
 		BackgroundTransparency = styleTokens.ActionEmphasis.Transparency,
@@ -933,6 +940,78 @@ local HIGH_PRIORITY_RULE_MAP = {
 		AnchorPoint = Vector2.new(1, 1),
 		FontFace = fontTokens.BuyButtonFont.Font,
 		TextSize = fontTokens.BuyButtonFont.FontSize,
+	},
+}
+
+local UV_CANVAS_RULES = {
+	[`.{tags.UVCanvasContainer}`] = {
+		BackgroundColor3 = styleTokens.Surface_0.Color3,
+		BackgroundTransparency = styleTokens.Surface_0.Transparency,
+	},
+	[`.{tags.UVCanvasContainer}::UIPadding`] = {
+		PaddingTop = styleTokens.Padding.Small,
+		PaddingBottom = styleTokens.Padding.Small,
+		PaddingLeft = styleTokens.Padding.Small,
+		PaddingRight = styleTokens.Padding.Small,
+	},
+	[`.{tags.UVCanvasContainer}::UIListLayout`] = {
+		FillDirection = Enum.FillDirection.Vertical,
+		Padding = styleTokens.Padding.Small,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	},
+	[`.{tags.UVCanvasContainer}::UICorner`] = {
+		CornerRadius = styleTokens.Radius.Medium,
+	},
+
+	[`.{tags.UVCanvasHeader}`] = {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	},
+	[`.{tags.UVCanvasHeader}::UIListLayout`] = {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = styleTokens.Padding.Medium,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		HorizontalFlex = Enum.UIFlexAlignment.SpaceBetween,
+	},
+
+	[`.{tags.UVCanvasHeaderButton}`] = {
+		Size = styleTokens.ButtonSize,
+		AutomaticSize = Enum.AutomaticSize.X,
+	},
+
+	[`.{tags.UVCanvas}`] = {
+		BackgroundColor3 = styleTokens.Surface_100.Color3,
+		BackgroundTransparency = styleTokens.Surface_100.Transparency,
+		Size = UDim2.fromScale(1, 0),
+	},
+	[`.{tags.UVCanvas}::UIFlexItem`] = {
+		FlexMode = Enum.UIFlexMode.Fill,
+	},
+	[`.{tags.UVCanvas}::UICorner`] = {
+		CornerRadius = styleTokens.Radius.Small,
+	},
+
+	[`.{tags.UVCanvasResizeGrip}`] = {
+		Size = styleTokens.SmallHandleSize,
+		BackgroundTransparency = 1,
+		FontFace = fontTokens.ToolTitleFont.Font,
+		TextSize = fontTokens.ToolTitleFont.FontSize,
+		TextColor3 = styleTokens.Colors.ContentDefault,
+		AutoButtonColor = false,
+	},
+
+	[`.{tags.UVCanvasCursor}`] = {
+		BackgroundTransparency = 1,
+	},
+	[`.{tags.UVCanvasCursor}::UIStroke`] = {
+		Color = styleTokens.Colors.White,
+		Thickness = styleTokens.MainHandleBorderThickness,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+	},
+	[`.{tags.UVCanvasCursor}::UICorner`] = {
+		CornerRadius = styleTokens.Radius.Circle,
 	},
 }
 
@@ -954,6 +1033,7 @@ local RULES = {
 	SLIDER_RULES,
 	SEGMENTED_CONTROL_RULES,
 	EDITING_HANDLE_RULES,
+	UV_CANVAS_RULES,
 }
 
 local function compileStandardRules(): { [string]: { [string]: any } }

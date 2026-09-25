@@ -85,6 +85,25 @@ export type CreationConfig = {
 		draggingColor: Color3,
 	},
 
+	uvCanvas: {
+		minZoom: number,
+		maxZoom: number,
+		zoomStepFactor: number,
+		pinchZoomPixelsPerStep: number,
+		wireframeColor: Color3,
+		wireframeOverlayTransparency: number,
+		wireframeThicknessScale: number,
+		heightScale: number,
+		panelGap: number,
+		modelScreenXScale: number,
+		stickerHitRadius: number,
+		minWindowSize: number,
+		checkerColorA: Color3,
+		checkerColorB: Color3,
+		checkerCellSize: number,
+		wireframeFacesPerYield: number,
+	},
+
 	reopenDebounceSeconds: number,
 
 	projectionEnabled: boolean,
@@ -230,6 +249,25 @@ local config: CreationConfig = {
 	widgets = {
 		color = Color3.fromHex("262626"),
 		draggingColor = Color3.fromHex("3C64FA"),
+	},
+
+	uvCanvas = {
+		minZoom = 1,
+		maxZoom = 16,
+		zoomStepFactor = 1.2,
+		pinchZoomPixelsPerStep = 40,
+		wireframeColor = Color3.fromHex("3C64FA"),
+		wireframeOverlayTransparency = 0.5,
+		wireframeThicknessScale = 0.004,
+		heightScale = 0.8,
+		panelGap = 12,
+		modelScreenXScale = 0.15,
+		stickerHitRadius = 40,
+		minWindowSize = 240,
+		checkerColorA = Color3.fromHex("3A3A3F"),
+		checkerColorB = Color3.fromHex("2B2B30"),
+		checkerCellSize = 12,
+		wireframeFacesPerYield = 2000,
 	},
 
 	reopenDebounceSeconds = 3,
