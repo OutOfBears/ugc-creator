@@ -246,23 +246,29 @@ local UnmergeKitbashPieceAction: ActionProcessor<UnmergeKitbashPieceActionMetada
 
 		if actionMetaData.atlasSlot then
 			local textureInfo = modelInfo:getTextureInfo()
-			local brushLayer, _ = textureInfo:getOrCreateLayer(targetMeshPart, CreationConfig.layerNames.brush)
 
-			local atlasSize = brushLayer.Size
-			local slotInfo = CreationConfig.atlasSlots[actionMetaData.atlasSlot]
-			local slotScale = 1.0 / CreationConfig.atlasGridSize
-			local slotWidth = atlasSize.X * slotScale
-			local slotHeight = atlasSize.Y * slotScale
-			local slotX = atlasSize.X * slotInfo.uOffset
-			local slotY = atlasSize.Y * slotInfo.vOffset
+			for _, paintLayer in textureInfo:getPaintLayers() do
+				local paintImage = textureInfo:getPaintLayerImage(targetMeshPart, paintLayer.id)
+				if not paintImage then
+					continue
+				end
 
-			brushLayer:DrawRectangle(
-				Vector2.new(slotX, slotY),
-				Vector2.new(slotWidth, slotHeight),
-				Color3.new(0, 0, 0),
-				1,
-				Enum.ImageCombineType.Overwrite
-			)
+				local atlasSize = paintImage.Size
+				local slotInfo = CreationConfig.atlasSlots[actionMetaData.atlasSlot]
+				local slotScale = 1.0 / CreationConfig.atlasGridSize
+				local slotWidth = atlasSize.X * slotScale
+				local slotHeight = atlasSize.Y * slotScale
+				local slotX = atlasSize.X * slotInfo.uOffset
+				local slotY = atlasSize.Y * slotInfo.vOffset
+
+				paintImage:DrawRectangle(
+					Vector2.new(slotX, slotY),
+					Vector2.new(slotWidth, slotHeight),
+					Color3.new(0, 0, 0),
+					1,
+					Enum.ImageCombineType.Overwrite
+				)
+			end
 
 			textureInfo:updateOutputColorMap(targetMeshPart)
 		end

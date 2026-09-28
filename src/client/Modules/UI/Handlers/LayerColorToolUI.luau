@@ -8,7 +8,6 @@ local Panel = require("../Components/Panel")
 local SegmentedControl = require("../Components/SegmentedControl")
 local StyleConsts = require("../Style/StyleConsts")
 local StyleUtils = require("../Style/StyleUtils")
-local TextButton = require("../Components/TextButton")
 local ToolFrame = require("../Components/ToolFrame")
 
 export type LayerColorToolUI = {
@@ -68,15 +67,7 @@ local function LayerColorToolUI(
 
 	local sectionListFrame = Create("Frame", {
 		Name = "SectionList",
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		Children = {
-			Create("UIListLayout", {
-				Padding = UDim.new(0, 4),
-				SortOrder = Enum.SortOrder.LayoutOrder,
-			}),
-		},
+		Tags = { StyleConsts.tags.SelectableList },
 	})
 
 	local sectionButtons: { [string]: TextButton } = {}
@@ -89,15 +80,22 @@ local function LayerColorToolUI(
 	end
 
 	for index, name in sectionNames do
-		local button = TextButton({
-			text = name,
-			callback = function()
-				selectSection(name)
-			end,
-		})
-		button.Size = UDim2.new(1, 0, 0, 32)
-		button.LayoutOrder = index
-		button.Parent = sectionListFrame
+		local button = Create("TextButton", {
+			Name = name,
+			Text = "",
+			LayoutOrder = index,
+			Tags = { StyleConsts.tags.SelectableRow },
+			Children = {
+				Create("TextLabel", {
+					Text = name,
+					Tags = { StyleConsts.tags.SelectableRowLabel },
+				}),
+			},
+			Parent = sectionListFrame,
+		}) :: TextButton
+		button.Activated:Connect(function()
+			selectSection(name)
+		end)
 		sectionButtons[name] = button
 	end
 	if activeSection then
@@ -120,6 +118,7 @@ local function LayerColorToolUI(
 		end
 
 		local segmented = maid:add(SegmentedControl(buttonInfos))
+		StyleUtils.addStyleTag(segmented.frame, StyleConsts.tags.SegmentedControlFill)
 
 		local groupTool = ToolFrame(segmented.frame, group.name)
 		groupTool.Parent = scrollingFrame

@@ -119,6 +119,15 @@ local StyleConsts: StyleConsts = {
 		UVCanvasResizeGrip = "UVCanvasResizeGrip",
 		UVCanvas = "UVCanvas",
 		UVCanvasCursor = "UVCanvasCursor",
+
+		SelectableList = "SelectableList",
+		SelectableRow = "SelectableRow",
+		SelectableRowLabel = "SelectableRowLabel",
+
+		LayerIconButton = "LayerIconButton",
+		LayerAddButton = "LayerAddButton",
+
+		SegmentedControlFill = "SegmentedControlFill",
 	},
 
 	regionOrdering = {

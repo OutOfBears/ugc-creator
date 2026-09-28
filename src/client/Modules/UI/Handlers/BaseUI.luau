@@ -64,7 +64,8 @@ local function BaseUI(
 	brushTool: any,
 	kitbashTool: any,
 	previewTool: any,
-	layerColorTool: any
+	layerColorTool: any,
+	layersTool: any
 ): BaseUI
 	local maid = Maid.new()
 	local object = {} :: BaseUI
@@ -108,8 +109,9 @@ local function BaseUI(
 	object.topBarUI = maid:add(TopBarUI(object, session))
 	object.resetEditsModalUI = maid:add(ResetEditsModalUI(object, session))
 	object.accessoryAdjustmentModalUI = maid:add(AccessoryAdjustmentModalUI(object, session))
-	object.editingUI =
-		maid:add(EditingUI(object, session, fabricTool, stickerTool, brushTool, kitbashTool, layerColorTool))
+	object.editingUI = maid:add(
+		EditingUI(object, session, fabricTool, stickerTool, brushTool, kitbashTool, layerColorTool, layersTool)
+	)
 	object.previewUI = maid:add(PreviewUI(object, session, previewTool))
 
 	local buyButtonText = if object.creationPrice > 0

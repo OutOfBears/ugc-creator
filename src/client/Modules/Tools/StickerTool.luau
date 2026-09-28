@@ -42,6 +42,7 @@ export type StickerData = {
 	positionMarkerOffset: CFrame?,
 
 	stickerLayerNumber: number,
+	paintLayerId: string,
 
 	isTextureSpace: boolean?,
 }
@@ -63,6 +64,7 @@ export type StickerTool = {
 	stickerCounter: number,
 	canvasPlacementMeshPart: MeshPart?,
 	canvasPlacementPosition: Vector2?,
+	activePaintLayerId: string,
 	mouseDownPos: Vector2?,
 	inputGui: ScreenGui,
 	uiHandles: EditHandle.EditHandle,
@@ -89,6 +91,8 @@ export type StickerTool = {
 	isPatterned: (self: StickerTool) -> boolean,
 	hasAppliedStickers: (self: StickerTool) -> boolean,
 	setCanvasPlacement: (self: StickerTool, meshPart: MeshPart?, texturePosition: Vector2?) -> (),
+	setActivePaintLayer: (self: StickerTool, layerId: string) -> (),
+	forgetStickersOnLayer: (self: StickerTool, layerId: string) -> (),
 	getSelectedSticker: (self: StickerTool) -> StickerData?,
 	moveSelectedStickerTo: (self: StickerTool, meshPart: MeshPart, texturePosition: Vector2) -> (),
 	setSelectedStickerTransform: (self: StickerTool, rotation: number?, scale: number?) -> (),
@@ -192,7 +196,7 @@ end
 	@client
 
 	Adds stickers to a creation and moves, rotates, scales and tiles them. Each sticker owns its
-	own texture layer. Dragging casts a ray from the camera to the cursor, converts the hit point
+	own texture layer and belongs to the paint layer that was active when it was placed. Dragging casts a ray from the camera to the cursor, converts the hit point
 	into UV coordinates, and redraws the sticker at those coordinates on the 2D texture.
 ]=]
 local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationInput.CreationInput): StickerTool
@@ -217,6 +221,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 	object.appliedStickers = modelInfo:getAppliedStickers() :: { StickerData }
 	object.stickerCounter = #object.appliedStickers
+	object.activePaintLayerId = CreationConfig.defaultPaintLayerId
 
 	object.maid = maid
 
@@ -624,6 +629,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 				targetMeshPart = canvasMeshPart,
 
 				stickerLayerNumber = layerNumber,
+				paintLayerId = self.activePaintLayerId,
 
 				isTextureSpace = true,
 			})
@@ -682,6 +688,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 			positionMarkerOffset = meshPart.CFrame:ToObjectSpace(marker.CFrame),
 
 			stickerLayerNumber = layerNumber,
+			paintLayerId = self.activePaintLayerId,
 		}
 
 		self:placeSticker(stickerData)
@@ -721,6 +728,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 				textureId = stickerData.textureId,
 				targetMeshPartName = stickerData.targetMeshPart.Name,
 				stickerLayerNumber = stickerData.stickerLayerNumber,
+				paintLayerId = stickerData.paintLayerId,
 
 				texturePosition = stickerData.texturePosition,
 
@@ -769,6 +777,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 						textureId = stickerData.textureId,
 						targetMeshPartName = meshPart.Name,
 						stickerLayerNumber = stickerData.stickerLayerNumber,
+						paintLayerId = stickerData.paintLayerId,
 						clearTexture = firstDraw,
 
 						rotation = math.rad(stickerData.rotation),
@@ -800,6 +809,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 				textureId = stickerData.textureId,
 				targetMeshPartName = stickerData.targetMeshPart.Name,
 				stickerLayerNumber = stickerData.stickerLayerNumber,
+				paintLayerId = stickerData.paintLayerId,
 
 				position = stickerData.texturePosition,
 
@@ -946,6 +956,40 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 	function object:setCanvasPlacement(meshPart: MeshPart?, texturePosition: Vector2?)
 		self.canvasPlacementMeshPart = meshPart
 		self.canvasPlacementPosition = texturePosition
+	end
+
+	--[=[
+		@within StickerTool
+		@param layerId string -- the paint layer new stickers are placed on
+	]=]
+	function object:setActivePaintLayer(layerId: string)
+		self.activePaintLayerId = layerId
+	end
+
+	--[=[
+		@within StickerTool
+		@param layerId string -- the paint layer being deleted
+
+		Drops the stickers on that layer from the tool's own bookkeeping. Their pixels are cleared
+		by the RemovePaintLayer action, so no sticker actions are sent.
+	]=]
+	function object:forgetStickersOnLayer(layerId: string)
+		for i = #self.appliedStickers, 1, -1 do
+			local stickerData = self.appliedStickers[i]
+			if stickerData.paintLayerId ~= layerId then
+				continue
+			end
+
+			if stickerData.positionMarker then
+				stickerData.positionMarker:Destroy()
+			end
+
+			table.remove(self.appliedStickers, i)
+			self.stickerCounter -= 1
+		end
+
+		self.currentlySelectedSticker = math.min(self.currentlySelectedSticker, #self.appliedStickers)
+		self:refreshHandleUI()
 	end
 
 	--[=[

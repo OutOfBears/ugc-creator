@@ -11,6 +11,7 @@ local IconButton = require("../Components/IconButton")
 local Kitbash = require(ReplicatedStorage.Shared.Data.Kitbash)
 local KitbashToolUI = require("./KitbashToolUI")
 local LayerColorToolUI = require("./LayerColorToolUI")
+local LayersToolUI = require("./LayersToolUI")
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local StickerPatternToolUI = require("./StickerPatternToolUI")
 local StickerToolUI = require("./StickerToolUI")
@@ -33,6 +34,7 @@ export type EditingUI = {
 	brushTool: any,
 	kitbashTool: any,
 	layerColorTool: any,
+	layersTool: any,
 	screenGui: ScreenGui,
 	panelParent: Frame,
 	toolbar: Toolbar.Toolbar,
@@ -43,6 +45,7 @@ export type EditingUI = {
 	stickerPatternToolUI: StickerPatternToolUI.StickerPatternToolUI,
 	kitbashToolUI: KitbashToolUI.KitbashToolUI,
 	layerColorToolUI: LayerColorToolUI.LayerColorToolUI?,
+	layersToolUI: LayersToolUI.LayersToolUI,
 	uvCanvasUI: UVCanvasUI.UVCanvasUI,
 	canvasButtonGroup: Frame,
 	isCanvasEnabled: boolean,
@@ -67,7 +70,8 @@ local function EditingUI(
 	stickerTool: any,
 	brushTool: any,
 	kitbashTool: any,
-	layerColorTool: any
+	layerColorTool: any,
+	layersTool: any
 ): EditingUI
 	local maid = Maid.new()
 	local object = {} :: EditingUI
@@ -84,6 +88,7 @@ local function EditingUI(
 	object.brushTool = brushTool
 	object.kitbashTool = kitbashTool
 	object.layerColorTool = layerColorTool
+	object.layersTool = layersTool
 
 	local hasLayerCatalog = session.modelInfo:getLayerCatalog() ~= nil
 
@@ -166,6 +171,8 @@ local function EditingUI(
 		if object.layerColorToolUI then
 			object.layerColorToolUI:close()
 		end
+
+		object.layersToolUI:close()
 
 		object.session:hideMeshEditControls()
 	end
@@ -459,6 +466,20 @@ local function EditingUI(
 			},
 		}
 
+		local layersGroup = {
+			{
+				iconId = CreationIcons.icons.Layers,
+				callback = function()
+					onOpenPanel()
+					object.brushTool:setStatePainting()
+					object.layersToolUI:open()
+					object.brushTool:enable()
+					object.session:panToLeft()
+					attachCanvas(object.layersToolUI.panel.frame, "paint")
+				end,
+			},
+		}
+
 		local stickerGroup = {
 			{
 				iconId = CreationIcons.icons.Decal,
@@ -503,6 +524,7 @@ local function EditingUI(
 			paintingGroup,
 			if hasLayerCatalog then layerColorGroup else fillGroup,
 			stickerGroup,
+			layersGroup,
 		}
 
 		if object.session.modelInfo:getKitbashingEnabled() then
@@ -564,6 +586,8 @@ local function EditingUI(
 	createStickerToolUI()
 	createStickerPatternToolUI()
 	createKitbashToolUI()
+	object.layersToolUI = maid:add(LayersToolUI(onClosePanel, object.layersTool))
+	object.layersToolUI.panel.frame.Parent = object.panelParent
 
 	setupToolbar()
 	setupCanvasToolbarButton()

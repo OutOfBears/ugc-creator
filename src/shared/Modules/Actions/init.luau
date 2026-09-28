@@ -1,6 +1,7 @@
 local ImageEditActions = require("./Actions/ImageEditActions")
 local MeshEditActions = require("./Actions/MeshEditActions")
 local ModelInfo = require("./ModelInfo")
+local PaintLayerActions = require("./Actions/PaintLayerActions")
 
 export type Action = {
 	actionType: string,
@@ -23,6 +24,12 @@ local ActionTypes = {
 	ProjectionBrush = "ProjectionBrush",
 	RecolorSection = "RecolorSection",
 	SelectVariant = "SelectVariant",
+
+	AddPaintLayer = "AddPaintLayer",
+	RemovePaintLayer = "RemovePaintLayer",
+	MovePaintLayer = "MovePaintLayer",
+	SetPaintLayerBlendMode = "SetPaintLayerBlendMode",
+	SetPaintLayerVisible = "SetPaintLayerVisible",
 
 	UpdateWidgetPosition = "UpdateWidgetPosition",
 	UpdateAttachmentsPositions = "UpdateAttachmentsPositions",
@@ -47,6 +54,12 @@ local ACTION_PROCESSOR_MAP = {
 	[ActionTypes.ProjectionBrush] = ImageEditActions.ProjectionBrushAction,
 	[ActionTypes.RecolorSection] = ImageEditActions.RecolorSectionAction,
 	[ActionTypes.SelectVariant] = ImageEditActions.SelectVariantAction,
+
+	[ActionTypes.AddPaintLayer] = PaintLayerActions.AddPaintLayerAction,
+	[ActionTypes.RemovePaintLayer] = PaintLayerActions.RemovePaintLayerAction,
+	[ActionTypes.MovePaintLayer] = PaintLayerActions.MovePaintLayerAction,
+	[ActionTypes.SetPaintLayerBlendMode] = PaintLayerActions.SetPaintLayerBlendModeAction,
+	[ActionTypes.SetPaintLayerVisible] = PaintLayerActions.SetPaintLayerVisibleAction,
 
 	[ActionTypes.UpdateWidgetPosition] = MeshEditActions.UpdateWidgetPositionAction,
 	[ActionTypes.UpdateAttachmentsPositions] = MeshEditActions.UpdateAttachmentsPositionsAction,

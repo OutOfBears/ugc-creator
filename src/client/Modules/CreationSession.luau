@@ -12,6 +12,7 @@ local CreationInput = require("./CreationInput")
 local FabricTool = require("./Tools/FabricTool")
 local KitbashTool = require("./Tools/KitbashTool")
 local LayerColorTool = require("./Tools/LayerColorTool")
+local LayersTool = require("./Tools/LayersTool")
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local MeshEditingWidgets = require("./MeshEditingWidgets")
 local ModelDisplay = require("./ModelDisplay")
@@ -36,6 +37,7 @@ export type CreationSession = {
 	kitbashTool: KitbashTool.KitbashTool,
 	previewTool: PreviewTool.PreviewTool?,
 	layerColorTool: LayerColorTool.LayerColorTool?,
+	layersTool: LayersTool.LayersTool,
 	baseUI: BaseUI.BaseUI,
 	editMode: number,
 	isMobile: boolean,
@@ -276,6 +278,7 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 	object.fabricTool = maid:add(FabricTool(modelInfo))
 	object.stickerTool = maid:add(StickerTool(modelInfo, object.creationInput))
 	object.kitbashTool = maid:add(KitbashTool(modelInfo, object.creationInput, object.modelDisplay))
+	object.layersTool = maid:add(LayersTool(modelInfo, object.brushTool, object.stickerTool))
 
 	if modelInfo:getCreationType() == CreationConfig.creationTypes.accessory then
 		object.previewTool = maid:add(PreviewTool(modelInfo, object.cameraManager, object.modelDisplay))
@@ -294,7 +297,8 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 			object.brushTool,
 			object.kitbashTool,
 			object.previewTool,
-			object.layerColorTool
+			object.layerColorTool,
+			object.layersTool
 		)
 	)
 

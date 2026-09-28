@@ -23,11 +23,17 @@ export type KitbashAtlasInfo = {
 	kitbashUScale: number,
 }
 
+export type PaintLayer = {
+	id: string,
+	blendMode: string,
+	visible: boolean,
+}
+
 export type LayerInfo = {
 	originalTextureId: string,
 	inputLayers: { SingleLayer },
 	outputEditableImage: EditableImage,
-	reservedBrushEditableImage: EditableImage,
+	paintImages: { [string]: EditableImage },
 	reservedFillEditableImage: EditableImage,
 	metalnessEI: EditableImage,
 	roughnessEI: EditableImage,
@@ -62,6 +68,9 @@ export type TextureInfo = {
 	lastCreatedEditableImage: EditableImage?,
 	lastCreatedEditableImageTextureId: string?,
 	memorySafeEditableImage: EditableImage?,
+	paintLayers: { PaintLayer },
+	stickerPaintLayers: { [string]: string },
+	blendScratchImages: { [string]: EditableImage },
 	-- methods
 	getMemorySafeEditableImage: (self: TextureInfo, textureId: string?, size: Vector2?) -> EditableImage,
 	hasRegion: (self: TextureInfo, regionName: string) -> boolean,
@@ -78,24 +87,23 @@ export type TextureInfo = {
 	removeLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> (),
 	hasLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> boolean,
 	updateOutputColorMap: (self: TextureInfo, meshPart: MeshPart) -> (),
+	getPaintLayers: (self: TextureInfo) -> { PaintLayer },
+	getPaintLayer: (self: TextureInfo, layerId: string) -> PaintLayer?,
+	getPaintLayerIndex: (self: TextureInfo, layerId: string) -> number?,
+	getPaintLayerImage: (self: TextureInfo, meshPart: MeshPart, layerId: string) -> EditableImage?,
+	addPaintLayer: (self: TextureInfo, layerId: string) -> boolean,
+	removePaintLayer: (self: TextureInfo, layerId: string) -> (),
+	movePaintLayer: (self: TextureInfo, layerId: string, toIndex: number) -> (),
+	setPaintLayerBlendMode: (self: TextureInfo, layerId: string, blendMode: string) -> (),
+	setPaintLayerVisible: (self: TextureInfo, layerId: string, visible: boolean) -> (),
+	setStickerPaintLayer: (self: TextureInfo, stickerLayerName: string, layerId: string?) -> (),
+	getStickerLayerNamesOnPaintLayer: (self: TextureInfo, layerId: string) -> { string },
 	getOriginalTextureId: (self: TextureInfo, meshPart: MeshPart) -> string,
 	getOutputTextureByName: (self: TextureInfo, meshPartName: string) -> EditableImage?,
 	getOrCreateEditableImageByTextureId: (self: TextureInfo, textureId: string) -> EditableImage,
 	meshPartsShareLayer: (self: TextureInfo, meshPart1: MeshPart, meshPart2: MeshPart) -> boolean,
 	destroy: (self: TextureInfo) -> (),
 }
-
-local function doMergeDownLayers(layerInfo: LayerInfo)
-	local outputImage = layerInfo.outputEditableImage
-
-	for i, layer: SingleLayer in layerInfo.inputLayers do
-		if i == 1 then
-			outputImage:DrawImage(Vector2.new(0, 0), layer.editableImage, Enum.ImageCombineType.Overwrite)
-		else
-			outputImage:DrawImage(Vector2.new(0, 0), layer.editableImage, Enum.ImageCombineType.BlendSourceOver)
-		end
-	end
-end
 
 --[=[
 	@class TextureInfo
@@ -131,6 +139,103 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		end)
 	end
 
+	local function getBlendScratchImage(size: Vector2, fillColor: Color3, fillTransparency: number): EditableImage?
+		local key = `{size.X}x{size.Y}`
+		local scratch = object.blendScratchImages[key]
+		if not scratch then
+			scratch = AssetService:CreateEditableImage({ Size = size })
+			if not scratch then
+				return nil
+			end
+			object.blendScratchImages[key] = scratch
+		end
+
+		scratch:DrawRectangle(Vector2.zero, size, fillColor, fillTransparency, Enum.ImageCombineType.Overwrite)
+
+		return scratch
+	end
+
+	local function getPaintLayerGroup(layerInfo: LayerInfo, paintLayer: PaintLayer): { EditableImage }
+		local group = {}
+
+		local paintImage = layerInfo.paintImages[paintLayer.id]
+		if paintImage then
+			table.insert(group, paintImage)
+		end
+
+		for _, layer in layerInfo.inputLayers do
+			if object.stickerPaintLayers[layer.name] == paintLayer.id then
+				table.insert(group, layer.editableImage)
+			end
+		end
+
+		return group
+	end
+
+	-- Subtract and Multiply are not alpha-aware: Subtract also subtracts the source alpha from the
+	-- canvas, and Multiply ignores partial source alpha. A group is therefore flattened into a
+	-- scratch image first (onto white for Multiply), and Subtract is followed by an opaque-black
+	-- Add that restores alpha on blanks whose color map is opaque.
+	local function blendPaintLayerGroup(outputImage: EditableImage, group: { EditableImage }, blendMode: string)
+		local modes = CreationConfig.paintBlendModes
+
+		if blendMode == modes.normal then
+			for _, image in group do
+				outputImage:DrawImage(Vector2.zero, image, Enum.ImageCombineType.BlendSourceOver)
+			end
+			return
+		end
+
+		local isMultiply = blendMode == modes.multiply
+		local source = group[1]
+		if #group > 1 or isMultiply then
+			local scratch = getBlendScratchImage(outputImage.Size, Color3.new(1, 1, 1), if isMultiply then 0 else 1)
+			if not scratch then
+				return
+			end
+
+			for _, image in group do
+				scratch:DrawImage(Vector2.zero, image, Enum.ImageCombineType.BlendSourceOver)
+			end
+			source = scratch
+		end
+
+		outputImage:DrawImage(Vector2.zero, source, (Enum.ImageCombineType :: any)[blendMode])
+
+		if blendMode == modes.subtract and not usesLayerDecals then
+			outputImage:DrawRectangle(Vector2.zero, outputImage.Size, Color3.new(0, 0, 0), 0, Enum.ImageCombineType.Add)
+		end
+	end
+
+	local function isStickerLayerName(layerName: string): boolean
+		local prefix = CreationConfig.layerNames.stickerPrefix
+
+		return string.sub(layerName, 1, #prefix) == prefix
+	end
+
+	local function doMergeDownLayers(layerInfo: LayerInfo)
+		local outputImage = layerInfo.outputEditableImage
+
+		for i, layer: SingleLayer in layerInfo.inputLayers do
+			if i == 1 then
+				outputImage:DrawImage(Vector2.zero, layer.editableImage, Enum.ImageCombineType.Overwrite)
+			elseif not isStickerLayerName(layer.name) then
+				outputImage:DrawImage(Vector2.zero, layer.editableImage, Enum.ImageCombineType.BlendSourceOver)
+			end
+		end
+
+		for _, paintLayer in object.paintLayers do
+			if not paintLayer.visible then
+				continue
+			end
+
+			local group = getPaintLayerGroup(layerInfo, paintLayer)
+			if #group > 0 then
+				blendPaintLayerGroup(outputImage, group, paintLayer.blendMode)
+			end
+		end
+	end
+
 	local destroyAllTrackedImages
 	local function throwMemoryError()
 		destroyAllTrackedImages()
@@ -142,6 +247,11 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			object.memorySafeEditableImage:Destroy()
 			object.memorySafeEditableImage = nil
 		end
+
+		for _, scratch in object.blendScratchImages do
+			scratch:Destroy()
+		end
+		table.clear(object.blendScratchImages)
 
 		maid:doCleaning()
 	end
@@ -344,11 +454,11 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			end
 			maid:giveTask(outputTexture)
 
-			local brushLayerEI = AssetService:CreateEditableImage({ Size = fullTextureSize })
-			if not brushLayerEI then
+			local defaultPaintEI = AssetService:CreateEditableImage({ Size = fullTextureSize })
+			if not defaultPaintEI then
 				throwMemoryError()
 			end
-			maid:giveTask(brushLayerEI)
+			maid:giveTask(defaultPaintEI)
 
 			local fillLayerEI = AssetService:CreateEditableImage({ Size = fullTextureSize })
 			if not fillLayerEI then
@@ -374,7 +484,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 				},
 				outputEditableImage = outputTexture,
 				originalTextureId = descendant.TextureID,
-				reservedBrushEditableImage = brushLayerEI,
+				paintImages = { [CreationConfig.defaultPaintLayerId] = defaultPaintEI },
 				reservedFillEditableImage = fillLayerEI,
 				metalnessEI = metalnessEI,
 				roughnessEI = roughnessEI,
@@ -691,7 +801,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	--[=[
 		@within TextureInfo
 		@param meshPart MeshPart -- the part whose layer stack to touch
-		@param layerName string -- brush, fabric fill or a sticker layer name
+		@param layerName string -- the fabric fill or a sticker layer name
 		@return EditableImage -- the layer image
 		@return boolean -- true if the layer was added to the stack by this call
 	]=]
@@ -705,9 +815,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		end
 
 		local newLayer
-		if layerName == CreationConfig.layerNames.brush then
-			newLayer = layerInfo.reservedBrushEditableImage
-		elseif layerName == CreationConfig.layerNames.fabricFill then
+		if layerName == CreationConfig.layerNames.fabricFill then
 			newLayer = layerInfo.reservedFillEditableImage
 		else
 			newLayer = self.reservedStickerEditableImageMap[layerName]
@@ -779,6 +887,174 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		if usesLayerDecals and RunService:IsClient() then
 			scheduleEdgeBleed(layerInfo)
 		end
+	end
+
+	--[=[
+		@within TextureInfo
+		@return { PaintLayer } -- the player's paint layers, bottom to top
+	]=]
+	function object:getPaintLayers(): { PaintLayer }
+		return self.paintLayers
+	end
+
+	--[=[
+		@within TextureInfo
+		@param layerId string -- the paint layer to look up
+		@return PaintLayer? -- the layer, or nil if no layer has that id
+	]=]
+	function object:getPaintLayer(layerId: string): PaintLayer?
+		local index = self:getPaintLayerIndex(layerId)
+
+		return if index then self.paintLayers[index] else nil
+	end
+
+	--[=[
+		@within TextureInfo
+		@param layerId string -- the paint layer to look up
+		@return number? -- its position in the stack, 1 being the bottom
+	]=]
+	function object:getPaintLayerIndex(layerId: string): number?
+		for i, paintLayer in self.paintLayers do
+			if paintLayer.id == layerId then
+				return i
+			end
+		end
+
+		return nil
+	end
+
+	--[=[
+		@within TextureInfo
+		@param meshPart MeshPart -- the part whose layer stack to look in
+		@param layerId string -- the paint layer
+		@return EditableImage? -- the image that layer paints into on that part's stack
+	]=]
+	function object:getPaintLayerImage(meshPart: MeshPart, layerId: string): EditableImage?
+		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
+		if not layerInfo then
+			return nil
+		end
+
+		return layerInfo.paintImages[layerId]
+	end
+
+	--[=[
+		@within TextureInfo
+		@param layerId string -- id for the new layer
+		@return boolean -- false if the editable-image budget could not fit it, leaving nothing added
+
+		Adds a Normal, visible paint layer on top of the stack, with one image per layer stack.
+	]=]
+	function object:addPaintLayer(layerId: string): boolean
+		local created: { [LayerInfo]: EditableImage } = {}
+
+		for _, layerInfo in self:getUniqueLayerMap() do
+			local image = AssetService:CreateEditableImage({ Size = layerInfo.outputEditableImage.Size })
+			if not image then
+				for createdLayerInfo, createdImage in created do
+					createdImage:Destroy()
+					createdLayerInfo.paintImages[layerId] = nil
+				end
+				return false
+			end
+
+			created[layerInfo] = image
+			layerInfo.paintImages[layerId] = image
+		end
+
+		table.insert(self.paintLayers, {
+			id = layerId,
+			blendMode = CreationConfig.paintBlendModes.normal,
+			visible = true,
+		})
+
+		return true
+	end
+
+	--[=[
+		@within TextureInfo
+		@param layerId string -- the paint layer to delete
+
+		Destroys the layer's images. Stickers it owns must be removed by the caller first.
+	]=]
+	function object:removePaintLayer(layerId: string)
+		local index = self:getPaintLayerIndex(layerId)
+		if not index then
+			return
+		end
+		table.remove(self.paintLayers, index)
+
+		for _, layerInfo in self:getUniqueLayerMap() do
+			local image = layerInfo.paintImages[layerId]
+			if image then
+				image:Destroy()
+				layerInfo.paintImages[layerId] = nil
+			end
+		end
+	end
+
+	--[=[
+		@within TextureInfo
+		@param layerId string -- the paint layer to move
+		@param toIndex number -- its new position, clamped to the stack
+	]=]
+	function object:movePaintLayer(layerId: string, toIndex: number)
+		local index = self:getPaintLayerIndex(layerId)
+		if not index then
+			return
+		end
+
+		local paintLayer = table.remove(self.paintLayers, index)
+		table.insert(self.paintLayers, math.clamp(toIndex, 1, #self.paintLayers + 1), paintLayer)
+	end
+
+	--[=[
+		@within TextureInfo
+		@param layerId string -- the paint layer to change
+		@param blendMode string -- a `CreationConfig.paintBlendModes` value
+	]=]
+	function object:setPaintLayerBlendMode(layerId: string, blendMode: string)
+		local paintLayer = self:getPaintLayer(layerId)
+		if paintLayer then
+			paintLayer.blendMode = blendMode
+		end
+	end
+
+	--[=[
+		@within TextureInfo
+		@param layerId string -- the paint layer to change
+		@param visible boolean -- false leaves the layer out of the merged color map
+	]=]
+	function object:setPaintLayerVisible(layerId: string, visible: boolean)
+		local paintLayer = self:getPaintLayer(layerId)
+		if paintLayer then
+			paintLayer.visible = visible
+		end
+	end
+
+	--[=[
+		@within TextureInfo
+		@param stickerLayerName string -- the sticker slot's layer name
+		@param layerId string? -- the paint layer that owns it, or nil to clear
+	]=]
+	function object:setStickerPaintLayer(stickerLayerName: string, layerId: string?)
+		self.stickerPaintLayers[stickerLayerName] = layerId
+	end
+
+	--[=[
+		@within TextureInfo
+		@param layerId string -- the paint layer
+		@return { string } -- the sticker slot layer names that paint layer owns
+	]=]
+	function object:getStickerLayerNamesOnPaintLayer(layerId: string): { string }
+		local names = {}
+		for stickerLayerName, ownerId in self.stickerPaintLayers do
+			if ownerId == layerId then
+				table.insert(names, stickerLayerName)
+			end
+		end
+
+		return names
 	end
 
 	--[=[
@@ -859,7 +1135,9 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			for _, layer in layerInfo.inputLayers do
 				layer.editableImage:Destroy()
 			end
-			layerInfo.reservedBrushEditableImage:Destroy()
+			for _, paintImage in layerInfo.paintImages do
+				paintImage:Destroy()
+			end
 			layerInfo.reservedFillEditableImage:Destroy()
 			layerInfo.outputEditableImage:Destroy()
 
@@ -877,6 +1155,16 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 		destroyAllTrackedImages()
 	end
+
+	object.paintLayers = {
+		{
+			id = CreationConfig.defaultPaintLayerId,
+			blendMode = CreationConfig.paintBlendModes.normal,
+			visible = true,
+		},
+	}
+	object.stickerPaintLayers = {}
+	object.blendScratchImages = {}
 
 	object.regionMap = setupRegionMap()
 	object.perMeshPartRegionMap = setupMeshPartToRegionMap(blankData.regionMapIndividual or {})

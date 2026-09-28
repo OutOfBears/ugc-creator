@@ -16,6 +16,16 @@ export type CreationStrings = {
 	uvWireframeToggle: string,
 	uvCanvasResetView: string,
 
+	layersPanelTitle: string,
+	layerNameFormat: string,
+	layerCountFormat: string,
+	addLayer: string,
+	blendModeLabel: string,
+	layerMoveUp: string,
+	layerMoveDown: string,
+	layerOutOfMemory: string,
+	layerHiddenPaint: string,
+
 	counters: { sticker: string, kitbash: string },
 }
 
@@ -44,6 +54,16 @@ local strings: CreationStrings = {
 	reflectivityToggle = "Reflective Effect",
 	uvWireframeToggle = "UV Lines",
 	uvCanvasResetView = "Fit",
+
+	layersPanelTitle = "Layers",
+	layerNameFormat = "Layer %d",
+	layerCountFormat = "%d of %d layers",
+	addLayer = "+ Add",
+	blendModeLabel = "Blend Mode",
+	layerMoveUp = "↑",
+	layerMoveDown = "↓",
+	layerOutOfMemory = "Not enough memory for another layer.",
+	layerHiddenPaint = "This layer is hidden. Show it to paint on it.",
 
 	counters = {
 		sticker = "Stickers Applied",

@@ -31,6 +31,8 @@ local creationIcons: CreationIcons = {
 		Pattern = "rbxassetid://107153084986708",
 		Kitbashing = "rbxassetid://135744896670779",
 		UVCanvas = "rbxassetid://107153084986708",
+		-- Placeholder: shares the UVCanvas art until a dedicated layers icon is uploaded.
+		Layers = "rbxassetid://107153084986708",
 
 		PaintbrushMuted = "rbxassetid://114632118377883",
 		EraserMuted = "rbxassetid://110165308214781",

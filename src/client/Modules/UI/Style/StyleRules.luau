@@ -922,6 +922,29 @@ local HIGH_PRIORITY_RULE_MAP = {
 		Visible = false,
 	},
 
+	-- Stretches a segmented control across its panel, sharing the width between its segments,
+	-- instead of the fixed-width segments the standalone avatar preview switcher uses.
+	[`.{tags.SegmentedControlFill}`] = {
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	},
+	[`.{tags.SegmentedControlFill} > .{tags.SegmentedControlButton}`] = {
+		Size = UDim2.new(
+			0,
+			0,
+			styleTokens.SegmentedControlButtonSize.Y.Scale,
+			styleTokens.SegmentedControlButtonSize.Y.Offset
+		),
+		TextSize = fontTokens.CounterLabelFont.FontSize,
+	},
+	[`.{tags.SegmentedControlFill} > .{tags.SegmentedControlButton}::UIFlexItem`] = {
+		FlexMode = Enum.UIFlexMode.Fill,
+	},
+	[`.{tags.SegmentedControlFill} > .{tags.SegmentedControlButton}::UIPadding`] = {
+		PaddingLeft = styleTokens.Padding.XXSmall,
+		PaddingRight = styleTokens.Padding.XXSmall,
+	},
+
 	[`.{tags.ToggleFrameLeft}`] = {
 		Size = UDim2.fromScale(0, 0),
 	},
@@ -940,6 +963,91 @@ local HIGH_PRIORITY_RULE_MAP = {
 		AnchorPoint = Vector2.new(1, 1),
 		FontFace = fontTokens.BuyButtonFont.Font,
 		TextSize = fontTokens.BuyButtonFont.FontSize,
+	},
+}
+
+local SELECTABLE_LIST_RULES = {
+	[`.{tags.SelectableList}`] = {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	},
+	[`.{tags.SelectableList}::UIListLayout`] = {
+		FillDirection = Enum.FillDirection.Vertical,
+		Padding = styleTokens.Padding.XSmall,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	},
+
+	[`.{tags.SelectableRow}`] = {
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = styleTokens.Surface_100.Color3,
+		BackgroundTransparency = styleTokens.Surface_100.Transparency,
+		AutoButtonColor = false,
+	},
+	[`.{tags.SelectableRow}::UICorner`] = {
+		CornerRadius = styleTokens.Radius.Medium,
+	},
+	[`.{tags.SelectableRow}::UIPadding`] = {
+		PaddingTop = styleTokens.Padding.XSmall,
+		PaddingBottom = styleTokens.Padding.XSmall,
+		PaddingLeft = styleTokens.Padding.Small,
+		PaddingRight = styleTokens.Padding.XSmall,
+	},
+	[`.{tags.SelectableRow}::UIListLayout`] = {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = styleTokens.Padding.XSmall,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+	},
+
+	[`.{tags.SelectableRowLabel}`] = {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(0, 32),
+		FontFace = fontTokens.ButtonFont.Font,
+		TextSize = fontTokens.ButtonFont.FontSize,
+		TextColor3 = styleTokens.Colors.ContentEmphasis,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	},
+	[`.{tags.SelectableRowLabel}::UIFlexItem`] = {
+		FlexMode = Enum.UIFlexMode.Fill,
+	},
+}
+
+local LAYERS_RULES = {
+	[`.{tags.LayerIconButton}`] = {
+		Size = UDim2.fromOffset(32, 32),
+		BackgroundColor3 = styleTokens.Shift_300.Color3,
+		BackgroundTransparency = styleTokens.Shift_300.Transparency,
+		FontFace = fontTokens.ButtonFont.Font,
+		TextSize = fontTokens.ButtonFont.FontSize,
+		TextColor3 = styleTokens.Colors.ContentEmphasis,
+	},
+	[`.{tags.LayerIconButton}::UICorner`] = {
+		CornerRadius = styleTokens.Radius.Small,
+	},
+	[`.{tags.LayerIconButton} > ImageLabel`] = {
+		Size = styleTokens.IconSize.Small,
+		Position = styleTokens.CenterPosition,
+		AnchorPoint = styleTokens.CenterAnchor,
+	},
+
+	[`.{tags.LayerAddButton}`] = {
+		Size = UDim2.fromOffset(0, 28),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = styleTokens.ActionEmphasis.Color3,
+		BackgroundTransparency = styleTokens.ActionEmphasis.Transparency,
+		FontFace = fontTokens.ButtonFont.Font,
+		TextSize = fontTokens.CounterLabelFont.FontSize,
+		TextColor3 = styleTokens.Colors.ContentEmphasis,
+	},
+	[`.{tags.LayerAddButton}::UICorner`] = {
+		CornerRadius = styleTokens.Radius.Circle,
+	},
+	[`.{tags.LayerAddButton}::UIPadding`] = {
+		PaddingLeft = styleTokens.Padding.Medium,
+		PaddingRight = styleTokens.Padding.Medium,
 	},
 }
 
@@ -1034,6 +1142,8 @@ local RULES = {
 	SEGMENTED_CONTROL_RULES,
 	EDITING_HANDLE_RULES,
 	UV_CANVAS_RULES,
+	SELECTABLE_LIST_RULES,
+	LAYERS_RULES,
 }
 
 local function compileStandardRules(): { [string]: { [string]: any } }

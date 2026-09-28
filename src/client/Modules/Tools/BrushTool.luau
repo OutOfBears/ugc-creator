@@ -7,9 +7,11 @@ local Brushes = require(ReplicatedStorage.Shared.Modules.Brushes)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationInput = require("../CreationInput")
+local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
 local ImageEditActions = require(ReplicatedStorage.Shared.Modules.Actions.ImageEditActions)
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local MeshUtils = require(ReplicatedStorage.Shared.Modules.Utils.MeshUtils)
+local Message = require("../UI/Message")
 local ModelInfo = require(ReplicatedStorage.Shared.Modules.ModelInfo)
 local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
 local TextureInfo = require(ReplicatedStorage.Shared.Modules.TextureInfo)
@@ -34,6 +36,7 @@ export type BrushTool = {
 	isLinearOverride: boolean,
 	lastVirtualCursorUpdate: number,
 	lastDrawnMeshPart: MeshPart?,
+	activePaintLayerId: string,
 	brushInputGui: ScreenGui,
 	inputCapture: Frame,
 	maid: Maid.Maid,
@@ -48,6 +51,7 @@ export type BrushTool = {
 	onColorChanged: (self: BrushTool, newColor: Color3) -> (),
 	setTransparency: (self: BrushTool, colorPickerOpacity: number) -> (),
 	setIsReflective: (self: BrushTool, isReflectiveMode: boolean) -> (),
+	setActivePaintLayer: (self: BrushTool, layerId: string) -> (),
 	enable: (self: BrushTool) -> (),
 	disable: (self: BrushTool) -> (),
 	clearAll: (self: BrushTool) -> (),
@@ -65,8 +69,8 @@ export type BrushTool = {
 	@class BrushTool
 	@client
 
-	Paints freeform brush strokes onto the creation's EditableImages. There is only one paint
-	layer per MeshPart, so a stroke that crosses onto a part with a different layer restarts as
+	Paints freeform brush strokes onto the active paint layer's EditableImages. Each layer has one
+	image per layer stack, so a stroke that crosses onto a part with a different stack restarts as
 	a fresh brush.
 ]=]
 local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationInput.CreationInput): BrushTool
@@ -91,6 +95,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 	object.isLinearOverride = false
 
 	object.lastVirtualCursorUpdate = 0
+	object.activePaintLayerId = CreationConfig.defaultPaintLayerId
 	object.maid = maid
 
 	--[=[
@@ -183,6 +188,17 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 
 	--[=[
 		@within BrushTool
+		@param layerId string -- the paint layer later strokes, and clearAll, act on
+
+		Ends any stroke in progress so it can't carry over onto the new layer.
+	]=]
+	function object:setActivePaintLayer(layerId: string)
+		self:endStroke()
+		self.activePaintLayerId = layerId
+	end
+
+	--[=[
+		@within BrushTool
 
 		Starts capturing input. The tool is constructed disabled so it only takes input once the
 		player has actually picked the brush.
@@ -201,15 +217,16 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 	--[=[
 		@within BrushTool
 
-		Wipes the brush layer from every MeshPart that has one.
+		Wipes the active paint layer on every MeshPart.
 	]=]
 	function object:clearAll()
 		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 
 		for _, meshPart in self.modelInfo:getMeshParts() do
-			if textureInfo:hasLayer(meshPart, CreationConfig.layerNames.brush) then
+			if textureInfo:getPaintLayerImage(meshPart, self.activePaintLayerId) then
 				local clearBrushActionMetadata: ImageEditActions.ClearBrushActionMetadata = {
 					targetMeshPartName = meshPart.Name,
+					paintLayerId = self.activePaintLayerId,
 				}
 
 				local action = Actions.createAction(Actions.ActionTypes.ClearBrush, clearBrushActionMetadata)
@@ -232,7 +249,8 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 	]=]
 	function object:createNewBrush(meshPart: MeshPart, forceLinearBrush: boolean?)
 		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
-		local brushLayer, _wasCreated = textureInfo:getOrCreateLayer(meshPart, CreationConfig.layerNames.brush)
+		local paintLayerId = self.activePaintLayerId
+		local brushLayer = textureInfo:getPaintLayerImage(meshPart, paintLayerId)
 		local pbrMaps = {
 			roughnessMap = textureInfo:getRoughnessMap(meshPart),
 			metalnessMap = textureInfo:getMetalnessMap(meshPart),
@@ -252,6 +270,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 			self.currentBrush = Brushes.ProjectionBrush(brushLayer, textureInfo, pbrMaps)
 			self.currentBrush:setCommitBrushStrokeCallback(
 				function(projectionBrushActionMetadata: ImageEditActions.ProjectionBrushActionMetadata)
+					projectionBrushActionMetadata.paintLayerId = paintLayerId
 					local brushAction =
 						Actions.createAction(Actions.ActionTypes.ProjectionBrush, projectionBrushActionMetadata)
 
@@ -269,6 +288,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 			self.currentBrush = Brushes.LinearBrush(brushLayer, textureInfo)
 			self.currentBrush:setCommitBrushStrokeCallback(
 				function(linearBrushActionMetadata: ImageEditActions.LinearBrushActionMetadata)
+					linearBrushActionMetadata.paintLayerId = paintLayerId
 					local brushAction = Actions.createAction(Actions.ActionTypes.LinearBrush, linearBrushActionMetadata)
 
 					if self.currentBrush:getRequireLocalExecute() then
@@ -501,6 +521,12 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 	function object:beginStroke(meshPart: MeshPart, drawInfo: Brushes.DrawInfo, forceLinearBrush: boolean?)
 		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 
+		local activeLayer = textureInfo:getPaintLayer(self.activePaintLayerId)
+		if not activeLayer or not activeLayer.visible then
+			task.spawn(Message.create, CreationStrings.layerHiddenPaint)
+			return
+		end
+
 		if
 			not self.currentBrush
 			or self.isLinearOverride ~= (forceLinearBrush == true)
@@ -572,6 +598,10 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 		onto a MeshPart that shares no layer with the last one.
 	]=]
 	function object:handleInputChanged(inputPosition: Vector2, isVirtualCursorMovement: boolean)
+		if not self.currentBrush then
+			return
+		end
+
 		local didHitModel, raycastResult: MeshUtils.EditableMeshRaycastResult? = self:castRayFromCamera(inputPosition)
 		if not didHitModel or not raycastResult then
 			self.currentBrush:penUp()

@@ -54,6 +54,7 @@ export type ApplyPBRToRegionActionMetadata = {
 
 export type BrushStrokeActionMetadata = {
 	targetMeshPartName: string,
+	paintLayerId: string,
 	brushSize: number,
 	brushColor: Color3,
 	brushTransparency: number,
@@ -62,10 +63,12 @@ export type BrushStrokeActionMetadata = {
 
 export type ClearBrushActionMetadata = {
 	targetMeshPartName: string,
+	paintLayerId: string,
 }
 
 export type LinearBrushActionMetadata = {
 	targetMeshPartName: string,
+	paintLayerId: string,
 	brushSize: number,
 	brushColor: Color3,
 	brushTransparency: number,
@@ -75,6 +78,7 @@ export type LinearBrushActionMetadata = {
 export type StickerActionMetadata = {
 	targetMeshPartName: string,
 	stickerLayerNumber: number,
+	paintLayerId: string,
 	textureId: string,
 
 	position: Vector2,
@@ -91,6 +95,7 @@ export type ProjectedStickerActionMetadata = {
 	targetMeshPartName: string,
 	textureId: string,
 	stickerLayerNumber: number,
+	paintLayerId: string,
 	clearTexture: boolean,
 
 	rotation: number,
@@ -102,6 +107,7 @@ export type ProjectedStickerActionMetadata = {
 export type TiledStickerActionMetadata = {
 	targetMeshPartName: string,
 	stickerLayerNumber: number,
+	paintLayerId: string,
 	textureId: string,
 
 	texturePosition: Vector2,
@@ -122,6 +128,7 @@ export type ClearRegionActionMetadata = {
 
 export type ProjectionBrushActionMetadata = {
 	referenceMeshPartName: string,
+	paintLayerId: string,
 	brushColor: Color3,
 	brushSize: number,
 	colorBlendType: Enum.ImageCombineType,
@@ -146,6 +153,23 @@ local function getSizeForTextureBuffer(modelInfo, colorMap: EditableImage): Vect
 		math.floor(colorMap.Size.X / CreationConfig.atlasGridSize),
 		math.floor(colorMap.Size.Y / CreationConfig.atlasGridSize)
 	)
+end
+
+local function getPaintLayerImage(modelInfo, meshPartName: string?, paintLayerId: any): EditableImage?
+	if typeof(paintLayerId) ~= "string" then
+		return nil
+	end
+
+	local meshPart = modelInfo:getMeshPartByName(meshPartName)
+	if not meshPart then
+		return nil
+	end
+
+	return modelInfo:getTextureInfo():getPaintLayerImage(meshPart, paintLayerId)
+end
+
+local function isValidPaintLayer(modelInfo, paintLayerId: any): boolean
+	return typeof(paintLayerId) == "string" and modelInfo:getTextureInfo():getPaintLayer(paintLayerId) ~= nil
 end
 
 local function getUniqueEditableImages(
@@ -399,16 +423,19 @@ ImageEditActions.BrushStrokeAction = {
 			return false
 		end
 
-		if not modelInfo:getMeshPartByName(actionMetaData.targetMeshPartName) then
+		if not getPaintLayerImage(modelInfo, actionMetaData.targetMeshPartName, actionMetaData.paintLayerId) then
 			return false
 		end
 
 		return true
 	end,
 	executeAction = function(modelInfo, actionMetaData: BrushStrokeActionMetadata)
-		local targetMeshPart = modelInfo:getMeshPartByName(actionMetaData.targetMeshPartName)
 		local textureInfo = modelInfo:getTextureInfo()
-		local brushLayer: EditableImage = textureInfo:getOrCreateLayer(targetMeshPart, CreationConfig.layerNames.brush)
+		local brushLayer: EditableImage = getPaintLayerImage(
+			modelInfo,
+			actionMetaData.targetMeshPartName,
+			actionMetaData.paintLayerId
+		) :: EditableImage
 
 		local brushSize = actionMetaData.brushSize
 		local color = actionMetaData.brushColor
@@ -433,7 +460,7 @@ ImageEditActions.BrushStrokeAction = {
 ]=]
 ImageEditActions.ClearBrushAction = {
 	isValidAction = function(modelInfo, actionMetaData: ClearBrushActionMetadata)
-		if not modelInfo:getMeshPartByName(actionMetaData.targetMeshPartName) then
+		if not getPaintLayerImage(modelInfo, actionMetaData.targetMeshPartName, actionMetaData.paintLayerId) then
 			return false
 		end
 
@@ -442,7 +469,11 @@ ImageEditActions.ClearBrushAction = {
 	executeAction = function(modelInfo, actionMetaData: ClearBrushActionMetadata)
 		local targetMeshPart = modelInfo:getMeshPartByName(actionMetaData.targetMeshPartName)
 		local textureInfo = modelInfo:getTextureInfo()
-		local brushLayer: EditableImage = textureInfo:getOrCreateLayer(targetMeshPart, CreationConfig.layerNames.brush)
+		local brushLayer: EditableImage = getPaintLayerImage(
+			modelInfo,
+			actionMetaData.targetMeshPartName,
+			actionMetaData.paintLayerId
+		) :: EditableImage
 
 		TextureUtils.clear(brushLayer)
 		TextureUtils.clearPBR(textureInfo, targetMeshPart)
@@ -468,16 +499,19 @@ ImageEditActions.LinearBrushAction = {
 			return false
 		end
 
-		if not modelInfo:getMeshPartByName(actionMetaData.targetMeshPartName) then
+		if not getPaintLayerImage(modelInfo, actionMetaData.targetMeshPartName, actionMetaData.paintLayerId) then
 			return false
 		end
 
 		return true
 	end,
 	executeAction = function(modelInfo, actionMetaData: LinearBrushActionMetadata)
-		local targetMeshPart = modelInfo:getMeshPartByName(actionMetaData.targetMeshPartName)
 		local textureInfo = modelInfo:getTextureInfo()
-		local brushLayer: EditableImage = textureInfo:getOrCreateLayer(targetMeshPart, CreationConfig.layerNames.brush)
+		local brushLayer: EditableImage = getPaintLayerImage(
+			modelInfo,
+			actionMetaData.targetMeshPartName,
+			actionMetaData.paintLayerId
+		) :: EditableImage
 
 		local rectPosition, rectSize =
 			TextureUtils.getStrokeRect(actionMetaData.drawPositions, actionMetaData.brushSize, brushLayer.Size)
@@ -529,6 +563,10 @@ ImageEditActions.StickerAction = {
 			return false
 		end
 
+		if not isValidPaintLayer(modelInfo, actionMetaData.paintLayerId) then
+			return false
+		end
+
 		if not isAllowedSticker(actionMetaData.textureId) then
 			return false
 		end
@@ -541,6 +579,10 @@ ImageEditActions.StickerAction = {
 		local stickerLayer: EditableImage, didCreateLayer: boolean = textureInfo:getOrCreateLayer(
 			targetMeshPart,
 			CreationConfig.layerNames.stickerPrefix .. actionMetaData.stickerLayerNumber
+		)
+		textureInfo:setStickerPaintLayer(
+			CreationConfig.layerNames.stickerPrefix .. actionMetaData.stickerLayerNumber,
+			actionMetaData.paintLayerId
 		)
 
 		if not didCreateLayer then
@@ -646,6 +688,10 @@ ImageEditActions.ProjectedStickerAction = {
 			return false
 		end
 
+		if not isValidPaintLayer(modelInfo, actionMetaData.paintLayerId) then
+			return false
+		end
+
 		if not isAllowedSticker(actionMetaData.textureId) then
 			return false
 		end
@@ -658,6 +704,10 @@ ImageEditActions.ProjectedStickerAction = {
 		local stickerLayer: EditableImage, didCreateLayer: boolean = textureInfo:getOrCreateLayer(
 			targetMeshPart,
 			CreationConfig.layerNames.stickerPrefix .. actionMetaData.stickerLayerNumber
+		)
+		textureInfo:setStickerPaintLayer(
+			CreationConfig.layerNames.stickerPrefix .. actionMetaData.stickerLayerNumber,
+			actionMetaData.paintLayerId
 		)
 
 		if not didCreateLayer and actionMetaData.clearTexture then
@@ -719,6 +769,10 @@ ImageEditActions.TiledStickerAction = {
 			return false
 		end
 
+		if not isValidPaintLayer(modelInfo, actionMetaData.paintLayerId) then
+			return false
+		end
+
 		if not isAllowedSticker(actionMetaData.textureId) then
 			return false
 		end
@@ -731,6 +785,10 @@ ImageEditActions.TiledStickerAction = {
 		local stickerLayer: EditableImage, didCreateLayer: boolean = textureInfo:getOrCreateLayer(
 			targetMeshPart,
 			CreationConfig.layerNames.stickerPrefix .. actionMetaData.stickerLayerNumber
+		)
+		textureInfo:setStickerPaintLayer(
+			CreationConfig.layerNames.stickerPrefix .. actionMetaData.stickerLayerNumber,
+			actionMetaData.paintLayerId
 		)
 		local isAccessory = modelInfo:getCreationType() == CreationConfig.creationTypes.accessory
 		local kitbashingEnabled = modelInfo:getKitbashingEnabled()
@@ -968,7 +1026,7 @@ ImageEditActions.ProjectionBrushAction = {
 			return false
 		end
 
-		if not modelInfo:getMeshPartByName(actionMetaData.referenceMeshPartName) then
+		if not getPaintLayerImage(modelInfo, actionMetaData.referenceMeshPartName, actionMetaData.paintLayerId) then
 			return false
 		end
 
@@ -981,8 +1039,11 @@ ImageEditActions.ProjectionBrushAction = {
 	executeAction = function(modelInfo, actionMetaData: ProjectionBrushActionMetadata)
 		local referenceMeshPart = modelInfo:getMeshPartByName(actionMetaData.referenceMeshPartName)
 		local textureInfo = modelInfo:getTextureInfo()
-		local targetLayer: EditableImage =
-			textureInfo:getOrCreateLayer(referenceMeshPart, CreationConfig.layerNames.brush)
+		local targetLayer: EditableImage = getPaintLayerImage(
+			modelInfo,
+			actionMetaData.referenceMeshPartName,
+			actionMetaData.paintLayerId
+		) :: EditableImage
 		local isErasing = actionMetaData.alphaBlendType ~= Enum.ImageAlphaType.Default
 
 		local intermediateEditableImage = nil
