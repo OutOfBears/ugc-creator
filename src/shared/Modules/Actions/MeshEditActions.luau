@@ -1,4 +1,7 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local AttachmentUtils = require("../Utils/AttachmentUtils")
+local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local MeshInfo = require("../MeshInfo")
 local MeshUtils = require("../Utils/MeshUtils")
 local MeshWidgetUtils = require("../Utils/MeshWidgetUtils")
@@ -110,6 +113,12 @@ local function checkMirrorWidget(
 	end
 end
 
+local function getSlotRect(modelInfo: ModelInfo.ModelInfo, atlasSlot: number?): CreationConfig.AtlasRect?
+	local atlasLayout = modelInfo:getAtlasLayout()
+
+	return if atlasLayout and atlasSlot then atlasLayout.slots[atlasSlot] else nil
+end
+
 --[=[
 	@within MeshEditActions
 	@prop UpdateWidgetPositionAction ActionProcessor<UpdateWidgetPositionActionMetadata>
@@ -197,7 +206,7 @@ local MergeKitbashPieceAction: ActionProcessor<MergeKitbashPieceActionMetadata> 
 			scale = actionMetaData.scale,
 			rotation = actionMetaData.rotation,
 			baseTextureLayer = baseTextureLayer,
-			atlasSlot = actionMetaData.atlasSlot,
+			slotRect = getSlotRect(modelInfo, actionMetaData.atlasSlot),
 			hasDrawnToAtlas = actionMetaData.hasDrawnToAtlas,
 		})
 
@@ -241,7 +250,7 @@ local UnmergeKitbashPieceAction: ActionProcessor<UnmergeKitbashPieceActionMetada
 		end
 		targetEditableMesh:RemoveUnused()
 
-		if actionMetaData.atlasSlot then
+		if getSlotRect(modelInfo, actionMetaData.atlasSlot) then
 			local textureInfo = modelInfo:getTextureInfo()
 			textureInfo:clearAtlasSlot(targetMeshPart, actionMetaData.atlasSlot)
 			textureInfo:updateOutputColorMap(targetMeshPart)

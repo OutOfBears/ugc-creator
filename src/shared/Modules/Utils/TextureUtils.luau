@@ -8,7 +8,10 @@
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local BrushTipUtil = require("./BrushTipUtil")
+local BrushTips = require(ReplicatedStorage.Shared.Data.BrushTips)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
+local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
 local RegionMaps = require(ReplicatedStorage.Shared.Data.RegionMaps)
 local TextureInfo = require("../TextureInfo")
 
@@ -124,7 +127,7 @@ end
 	@within TextureUtils
 	@param oldPosition Vector2 -- where the last stamp landed
 	@param newPosition Vector2 -- where this stamp lands
-	@param brushSize number -- brush diameter in pixels
+	@param brushSize number -- brush radius in pixels (`DrawCircle` takes a radius)
 	@param brushColor Color3 -- brush color
 	@param brushTransparency number -- 0 opaque to 1 invisible
 	@param editableImage EditableImage -- the layer to stamp onto
@@ -158,6 +161,63 @@ local function drawCircleBetweenPoints(
 			Enum.ImageCombineType.Overwrite
 		)
 	end
+end
+
+--[=[
+	@within TextureUtils
+	@param oldPosition Vector2 -- where the last stamp landed
+	@param newPosition Vector2 -- where this stamp lands
+	@param brushRadius number -- brush radius in pixels, as [TextureUtils.drawCircleBetweenPoints] takes it
+	@param tipId string? -- the [BrushTips] tip, or nil for the default
+	@param stamp EditableImage -- the tinted tip from [TextureUtils.createLinearStamp]
+	@param editableImage EditableImage -- the layer to stamp onto
+
+	Stamps the tip along the segment at the tip's spacing, at sub-pixel positions with filtering, so
+	the stroke's edges stay smooth. Blends over the layer, so it paints but never erases.
+]=]
+local function stampBetweenPoints(
+	oldPosition: Vector2,
+	newPosition: Vector2,
+	brushRadius: number,
+	tipId: string?,
+	stamp: EditableImage,
+	editableImage: EditableImage
+)
+	local tip = BrushTipUtil.getTip(tipId)
+	local diameter = brushRadius * 2
+	local scale = Vector2.one * (diameter / stamp.Size.X)
+	local spacing = math.max(diameter * tip.spacing, 1)
+	local distance = (newPosition - oldPosition).Magnitude
+	local steps = math.ceil(distance / spacing)
+
+	local function stampAt(position: Vector2)
+		editableImage:DrawImageTransformed(position, scale, 0, stamp, {
+			CombineType = Enum.ImageCombineType.BlendSourceOver,
+		})
+	end
+
+	if steps == 0 then
+		stampAt(newPosition)
+		return
+	end
+
+	for step = 1, steps do
+		stampAt(oldPosition:Lerp(newPosition, step / steps))
+	end
+end
+
+--[=[
+	@within TextureUtils
+	@param brushRadius number -- brush radius in pixels
+	@param brushColor Color3 -- brush color
+	@param tipId string? -- the [BrushTips] tip, or nil for the default
+	@return EditableImage -- the tip rasterized at the brush's own size, for [TextureUtils.stampBetweenPoints]; caller destroys it
+]=]
+local function createLinearStamp(brushRadius: number, brushColor: Color3, tipId: string?): EditableImage
+	local stamp =
+		BrushTipUtil.createStamp(BrushTipUtil.getTip(tipId), math.max(math.ceil(brushRadius * 2), 2), brushColor, false)
+
+	return assert(stamp, CreationStrings.failedToCreateImage)
 end
 
 --[=[
@@ -768,43 +828,30 @@ end
 
 --[=[
 	@within TextureUtils
-	@param sourceAlpha number -- transparency of the area outside the round cap
-	@param targetAlpha number -- transparency of the painted area
 	@param penColor Color3 -- the color both decals are filled with
 	@param colorBlendType Enum.ImageCombineType -- how the decal color combines with the layer
-	@param alphaBlendType Enum.ImageAlphaType -- how the decal alpha combines with the layer
+	@param alphaBlendType Enum.ImageAlphaType -- how the decal alpha combines with the layer; anything but Default erases
+	@param tipId string? -- the [BrushTips] tip to stamp, or nil for the default
 	@return EditableImage -- the round cap decal, caller destroys it
 	@return EditableImage -- the connecting bar decal, caller destroys it
 	@return BrushConfig -- config wrapping the round cap decal
 	@return BrushConfig -- config wrapping the connecting bar decal
+
+	Projection samples its decal without filtering, so the cap is rasterized at the tip's full
+	stamp resolution with a soft edge rather than scaled up from a small hard circle.
 ]=]
 local function createAndSetupProjectionBrushTexturesAndConfigs(
-	sourceAlpha: number,
-	targetAlpha: number,
 	penColor: Color3,
 	colorBlendType: Enum.ImageCombineType,
-	alphaBlendType: Enum.ImageAlphaType
+	alphaBlendType: Enum.ImageAlphaType,
+	tipId: string?
 ): (EditableImage, EditableImage, BrushConfig, BrushConfig)
-	local circleTexture = AssetService:CreateEditableImage({
-		Size = Vector2.new(64, 64),
-	})
+	local tip = BrushTipUtil.getTip(tipId)
+	local isErasing = alphaBlendType ~= Enum.ImageAlphaType.Default
 
-	local lineTexture = AssetService:CreateEditableImage({
-		Size = Vector2.new(4, 4),
-	})
-
-	local circleTextureSize = circleTexture.Size
-	local circleTextureSizeHalfSize = circleTextureSize * 0.5
-	circleTexture:DrawRectangle(Vector2.zero, circleTextureSize, penColor, sourceAlpha, Enum.ImageCombineType.Overwrite)
-	circleTexture:DrawCircle(
-		circleTextureSizeHalfSize,
-		circleTextureSizeHalfSize.X,
-		penColor,
-		targetAlpha,
-		Enum.ImageCombineType.Overwrite
-	)
-
-	lineTexture:DrawRectangle(Vector2.zero, lineTexture.Size, penColor, targetAlpha, Enum.ImageCombineType.Overwrite)
+	local circleTexture = BrushTipUtil.createStamp(tip, BrushTips.stampResolution, penColor, isErasing)
+	local lineTexture = BrushTipUtil.createSegmentStamp(tip, 4, BrushTips.stampResolution, penColor, isErasing)
+	assert(circleTexture and lineTexture, CreationStrings.failedToCreateImage)
 
 	local circleBrushConfig: BrushConfig = {
 		Decal = circleTexture,
@@ -873,6 +920,7 @@ end
 	@param roughnessMap EditableImage -- the part's roughness map
 	@param metalnessMap EditableImage -- the part's metalness map
 	@param normalMap EditableImage -- the part's normal map
+	@param tipId string? -- the [BrushTips] tip the color stroke uses, so the PBR stamps match it
 	@return PBRInfo -- per-channel decal configs to project alongside the color stroke
 	@return { EditableImage } -- the decals backing those configs, caller destroys them
 
@@ -883,7 +931,8 @@ local function generatePBRInfo(
 	isReflectiveMode: boolean?,
 	roughnessMap: EditableImage,
 	metalnessMap: EditableImage,
-	normalMap: EditableImage
+	normalMap: EditableImage,
+	tipId: string?
 ): (PBRInfo, { EditableImage })
 	local pbrInfo = {}
 	local pbrBrushTextures = {}
@@ -918,11 +967,10 @@ local function generatePBRInfo(
 
 	for channelName, channelData in pairs(pbrChannels) do
 		local circleBrush, lineBrush, circleConfig, lineConfig = createAndSetupProjectionBrushTexturesAndConfigs(
-			1.0,
-			0.0,
 			channelData.defaultColor,
 			Enum.ImageCombineType.BlendSourceOver,
-			Enum.ImageAlphaType.Default
+			Enum.ImageAlphaType.Default,
+			tipId
 		)
 
 		pbrInfo[channelName] = {
@@ -1021,6 +1069,8 @@ return {
 	clear = clear,
 	createCheckerImage = createCheckerImage,
 	drawCircleBetweenPoints = drawCircleBetweenPoints,
+	stampBetweenPoints = stampBetweenPoints,
+	createLinearStamp = createLinearStamp,
 	getStrokeRect = getStrokeRect,
 	performRegionStencil = performRegionStencil,
 	regionContainsPixel = regionContainsPixel,

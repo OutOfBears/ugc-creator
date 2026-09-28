@@ -212,10 +212,16 @@ end
 --[=[
 	@within Blanks
 	@param definition BlankDefinition -- the blank to check
-	@return boolean -- true if its color map is a kitbash atlas (own texture in the top-left cell)
+	@return AtlasLayout? -- how its color map is divided between its own texture and attached pieces, or nil if it isn't an atlas
 ]=]
-function Blanks.usesAtlas(definition: BlankDefinition): boolean
-	return definition.enableKitbashing == true or definition.accessoryCatalogName ~= nil
+function Blanks.getAtlasLayout(definition: BlankDefinition): CreationConfig.AtlasLayout?
+	if definition.accessoryCatalogName then
+		return CreationConfig.atlasLayouts.accessorySwap
+	elseif definition.enableKitbashing then
+		return CreationConfig.atlasLayouts.kitbash
+	end
+
+	return nil
 end
 
 --[=[

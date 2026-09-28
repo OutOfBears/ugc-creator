@@ -36,10 +36,11 @@ end
 	@class AccessoryCatalogs
 
 	The swappable accessories per head base, keyed by the blank's `accessoryCatalogName`. Each slot
-	(ears, horns, …) owns one cell of the kitbash atlas (`atlasSlot`, an index into
-	`CreationConfig.atlasSlots`), so a head has at most three slots. The selected option's mesh is
-	merged into the head at `offset` (head space, default identity) and `scale`, and its `colors`
-	catalog is baked into the slot's atlas cell. An `optional` slot may be left empty.
+	(ears, horns, …) owns one cell of the atlas (`atlasSlot`, an index into
+	`CreationConfig.atlasLayouts.accessorySwap.slots`), so a head has at most three slots. The
+	selected option's mesh is merged into the head at `offset` (head space, default identity) and
+	`scale`, and its `colors` catalog is baked into the slot's atlas cell. An `optional` slot may be
+	left empty.
 ]=]
 local catalogs: AccessoryCatalogs = {
 	-- PLACEHOLDER: stand-in meshes and textures from `Assets.KitbashPieces` until the earless Fox

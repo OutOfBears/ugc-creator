@@ -1,8 +1,13 @@
-export type AtlasSlot = {
+export type AtlasRect = {
 	uOffset: number,
 	vOffset: number,
-	uCenter: number,
-	vCenter: number,
+	uScale: number,
+	vScale: number,
+}
+
+export type AtlasLayout = {
+	base: AtlasRect,
+	slots: { AtlasRect },
 }
 
 export type CreationConfig = {
@@ -39,7 +44,7 @@ export type CreationConfig = {
 	defaultKitbashMaxScale: number,
 	atlasGridSize: number,
 	atlasMaxKitbashPieces: number,
-	atlasSlots: { AtlasSlot },
+	atlasLayouts: { kitbash: AtlasLayout, accessorySwap: AtlasLayout },
 
 	pbrMapCellSize: Vector2,
 	pbrDefaultMetalColor: Color3,
@@ -106,6 +111,7 @@ export type CreationConfig = {
 		checkerColorA: Color3,
 		checkerColorB: Color3,
 		checkerCellSize: number,
+		pixelatedDisplayScale: number,
 		wireframeFacesPerYield: number,
 	},
 
@@ -120,10 +126,10 @@ export type CreationConfig = {
 
 local ATLAS_GRID_SIZE = 2
 
--- Slot (0,0) is reserved for the base texture, so kitbash pieces start at the second cell.
-local function generateAtlasSlots(gridSize: number): { AtlasSlot }
+-- Cell (0,0) holds the creation's own texture, so kitbash pieces start at the second cell.
+local function generateGridLayout(gridSize: number): AtlasLayout
+	local cellScale = 1 / gridSize
 	local slots = {}
-	local slotSize = 1 / gridSize
 
 	for row = 0, gridSize - 1 do
 		for col = 0, gridSize - 1 do
@@ -132,15 +138,18 @@ local function generateAtlasSlots(gridSize: number): { AtlasSlot }
 			end
 
 			table.insert(slots, {
-				uOffset = col * slotSize,
-				vOffset = row * slotSize,
-				uCenter = (col + 0.5) * slotSize,
-				vCenter = (row + 0.5) * slotSize,
+				uOffset = col * cellScale,
+				vOffset = row * cellScale,
+				uScale = cellScale,
+				vScale = cellScale,
 			})
 		end
 	end
 
-	return slots
+	return {
+		base = { uOffset = 0, vOffset = 0, uScale = cellScale, vScale = cellScale },
+		slots = slots,
+	}
 end
 
 --[=[
@@ -213,7 +222,17 @@ local config: CreationConfig = {
 	defaultKitbashMaxScale = 2,
 	atlasGridSize = ATLAS_GRID_SIZE,
 	atlasMaxKitbashPieces = (ATLAS_GRID_SIZE * ATLAS_GRID_SIZE) - 1,
-	atlasSlots = generateAtlasSlots(ATLAS_GRID_SIZE),
+	atlasLayouts = {
+		kitbash = generateGridLayout(ATLAS_GRID_SIZE),
+		accessorySwap = {
+			base = { uOffset = 0, vOffset = 0, uScale = 1, vScale = 0.75 },
+			slots = {
+				{ uOffset = 0, vOffset = 0.75, uScale = 1 / 3, vScale = 0.25 },
+				{ uOffset = 1 / 3, vOffset = 0.75, uScale = 1 / 3, vScale = 0.25 },
+				{ uOffset = 2 / 3, vOffset = 0.75, uScale = 1 / 3, vScale = 0.25 },
+			},
+		},
+	},
 
 	pbrMapCellSize = Vector2.new(256, 256),
 	pbrDefaultMetalColor = Color3.fromRGB(0, 0, 0),
@@ -284,6 +303,7 @@ local config: CreationConfig = {
 		checkerColorA = Color3.fromHex("3A3A3F"),
 		checkerColorB = Color3.fromHex("2B2B30"),
 		checkerCellSize = 12,
+		pixelatedDisplayScale = 4,
 		wireframeFacesPerYield = 2000,
 	},
 

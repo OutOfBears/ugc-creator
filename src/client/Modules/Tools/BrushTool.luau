@@ -4,6 +4,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
+local BrushTips = require(ReplicatedStorage.Shared.Data.BrushTips)
 local Brushes = require(ReplicatedStorage.Shared.Modules.Brushes)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
@@ -28,6 +29,7 @@ export type BrushTool = {
 	currentBrushSize: number,
 	currentBrushColor: Color3,
 	currentBrushTransparency: number,
+	brushTipId: string,
 	isReflectiveMode: boolean,
 	currentEraserSize: number,
 	touchPoints: { InputObject },
@@ -84,6 +86,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 	object.currentBrushSize = 10
 	object.currentBrushColor = Color3.new(1, 1, 1)
 	object.currentBrushTransparency = 0
+	object.brushTipId = BrushTips.defaultTipId
 	object.isReflectiveMode = false
 	object.currentEraserSize = 5
 
@@ -322,6 +325,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 		self.currentBrush:setIsReflective(self.isReflectiveMode)
 		self.currentBrush:setSize(self:getActiveSize())
 		self.currentBrush:setTransparency(currentTransparency)
+		self.currentBrush:setTip(self.brushTipId)
 		self.currentBrush:setCurrentMeshPart(meshPart)
 		self.currentBrush:setColorBlendType(currentColorBlendType)
 		self.currentBrush:setAlphaBlendType(currentAlphaBlendType)
@@ -430,10 +434,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 			)
 
 			local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
-			local textureSize = textureInfo:getTextureSize(raycastResult.meshPart)
-			if self.modelInfo:getUsesAtlas() then
-				textureCoord *= CreationConfig.atlasGridSize
-			end
+			local textureSize = textureInfo:getImageSize(raycastResult.meshPart)
 
 			local drawX = textureCoord.X * textureSize.X
 			local drawY = textureCoord.Y * textureSize.Y
@@ -638,11 +639,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 		)
 
 		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
-		local textureSize = textureInfo:getTextureSize(raycastResult.meshPart)
-		if self.modelInfo:getUsesAtlas() then
-			textureCoord *= CreationConfig.atlasGridSize
-		end
-		local drawPosition = textureCoord * textureSize
+		local drawPosition = textureCoord * textureInfo:getImageSize(raycastResult.meshPart)
 
 		local drawInfo: Brushes.DrawInfo = {
 			textureDrawPosition = drawPosition,

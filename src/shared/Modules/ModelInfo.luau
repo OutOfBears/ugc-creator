@@ -48,7 +48,7 @@ export type ModelInfo = {
 	getBlankName: (self: ModelInfo) -> string,
 	getCreationType: (self: ModelInfo) -> string,
 	getKitbashingEnabled: (self: ModelInfo) -> boolean?,
-	getUsesAtlas: (self: ModelInfo) -> boolean,
+	getAtlasLayout: (self: ModelInfo) -> CreationConfig.AtlasLayout?,
 	getLayerCatalogName: (self: ModelInfo) -> string?,
 	getLayerCatalog: (self: ModelInfo) -> ColorLayers.Catalog?,
 	getAccessoryCatalog: (self: ModelInfo) -> AccessoryCatalogs.AccessoryCatalog?,
@@ -194,10 +194,10 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 
 	--[=[
 		@within ModelInfo
-		@return boolean -- true if the color map is a kitbash atlas, with this creation's own texture in the top-left cell
+		@return AtlasLayout? -- how the color map is divided between this creation's own texture and attached pieces, or nil if it isn't an atlas
 	]=]
-	function object:getUsesAtlas(): boolean
-		return Blanks.usesAtlas(self.blank)
+	function object:getAtlasLayout(): CreationConfig.AtlasLayout?
+		return Blanks.getAtlasLayout(self.blank)
 	end
 
 	--[=[
@@ -337,7 +337,7 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 				positionMarkerCFrame = targetPart.CFrame * (option.offset or CFrame.identity),
 				scale = option.scale or 1,
 				rotation = 0,
-				atlasSlot = slot.atlasSlot,
+				slotRect = assert(self:getAtlasLayout(), "Accessories need an atlas").slots[slot.atlasSlot],
 				hasDrawnToAtlas = true,
 			})
 		end
@@ -360,9 +360,8 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 		end
 
 		local baseImage = self.textureInfo:getBaseLayer(targetPart)
-		local cellSize = self.textureInfo:getTextureSize(targetPart)
 
-		local function getCompositor(key: string, catalog: ColorLayers.Catalog)
+		local function getCompositor(key: string, catalog: ColorLayers.Catalog, cellSize: Vector2)
 			local compositor = self.colorCompositors[key]
 			if compositor == nil then
 				local ok, result = pcall(LayerColorCompositor, catalog, cellSize)
@@ -380,13 +379,14 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 		end
 
 		local function bakeCell(cellIndex: number, key: string, catalog: ColorLayers.Catalog?, keyPrefix: string)
-			local origin = Vector2.zero
-			if cellIndex ~= HEAD_CELL then
-				local slotInfo = CreationConfig.atlasSlots[cellIndex]
-				origin = Vector2.new(baseImage.Size.X * slotInfo.uOffset, baseImage.Size.Y * slotInfo.vOffset)
+			local origin, cellSize
+			if cellIndex == HEAD_CELL then
+				origin, cellSize = Vector2.zero, self.textureInfo:getTextureSize(targetPart)
+			else
+				origin, cellSize = self.textureInfo:getAtlasSlotRect(targetPart, cellIndex)
 			end
 
-			local compositor = if catalog then getCompositor(key, catalog) else false
+			local compositor = if catalog then getCompositor(key, catalog, cellSize) else false
 			if compositor then
 				compositor:composeInto(
 					baseImage,

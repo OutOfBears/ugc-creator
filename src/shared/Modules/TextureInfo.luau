@@ -2,6 +2,7 @@ local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local AtlasUtil = require("./Utils/AtlasUtil")
 local Blanks = require(ReplicatedStorage.Shared.Data.Blanks)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
@@ -82,11 +83,13 @@ export type TextureInfo = {
 	getNormalMap: (self: TextureInfo, meshPart: MeshPart) -> EditableImage,
 	getBaseLayer: (self: TextureInfo, meshPart: MeshPart) -> EditableImage,
 	getTextureSize: (self: TextureInfo, meshPart: MeshPart) -> Vector2,
+	getImageSize: (self: TextureInfo, meshPart: MeshPart) -> Vector2,
 	getOrCreateLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> (EditableImage, boolean),
 	removeLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> (),
 	hasLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> boolean,
 	updateOutputColorMap: (self: TextureInfo, meshPart: MeshPart) -> (),
 	flushOutputColorMap: (self: TextureInfo, meshPart: MeshPart) -> (),
+	getAtlasSlotRect: (self: TextureInfo, meshPart: MeshPart, atlasSlot: number) -> (Vector2, Vector2),
 	clearAtlasSlot: (self: TextureInfo, meshPart: MeshPart, atlasSlot: number) -> (),
 	getPaintLayers: (self: TextureInfo) -> { PaintLayer },
 	getPaintLayer: (self: TextureInfo, layerId: string) -> PaintLayer?,
@@ -119,7 +122,12 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 	object.creationType = blankData.creationType
 	object.individualPartsNames = blankData.individualPartsNames
-	object.enableKitbashing = Blanks.usesAtlas(blankData)
+	local atlasLayout = Blanks.getAtlasLayout(blankData)
+	object.enableKitbashing = atlasLayout ~= nil
+
+	local atlasCellSize = if atlasLayout
+		then select(2, AtlasUtil.toPixels(atlasLayout.base, resolution))
+		else resolution
 
 	local pendingFrameUpdates: { [LayerInfo]: boolean } = {}
 	local frameUpdateConnection: RBXScriptConnection? = nil
@@ -286,13 +294,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			throwMemoryError()
 		end
 
-		local targetSize = resolution
-		if accommodateKitbash then
-			targetSize = Vector2.new(
-				math.floor(targetSize.X / CreationConfig.atlasGridSize),
-				math.floor(targetSize.Y / CreationConfig.atlasGridSize)
-			)
-		end
+		local targetSize = if accommodateKitbash then atlasCellSize else resolution
 
 		if originalImage.Size.X == targetSize.X and originalImage.Size.Y == targetSize.Y then
 			return originalImage
@@ -311,9 +313,10 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			scale = originalImage.Size.Y / targetSize.Y
 		end
 
+		-- An atlas cell is filled edge to edge because the part's UVs span it, even when it isn't square.
 		scaledImage:DrawImageTransformed(
 			Vector2.new(scaledImage.Size.X / 2, scaledImage.Size.Y / 2),
-			Vector2.new(1 / scale, 1 / scale),
+			if accommodateKitbash then targetSize / originalImage.Size else Vector2.new(1 / scale, 1 / scale),
 			0,
 			originalImage,
 			-- Region masks must stay pixelated through a rescale or the color-to-region mapping breaks.
@@ -370,13 +373,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			if hasBaseTexture then
 				baseTexture = createScaledEditableImage(Content.fromUri(descendant.TextureID), accommodateKitbash)
 			else
-				local blankSize = resolution
-				if accommodateKitbash then
-					blankSize = Vector2.new(
-						math.floor(resolution.X / CreationConfig.atlasGridSize),
-						math.floor(resolution.Y / CreationConfig.atlasGridSize)
-					)
-				end
+				local blankSize = if accommodateKitbash then atlasCellSize else resolution
 				baseTexture = AssetService:CreateEditableImage({ Size = blankSize })
 			end
 			if not baseTexture then
@@ -389,14 +386,11 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			}
 			local originalTextureSize = baseTexture.Size
 
-			-- The kitbash atlas is a 2x2 grid whose top-left cell holds the creation's own texture;
-			-- the remaining cells are reserved for the textures of attached kitbash pieces.
+			-- The creation's own texture sits in the atlas layout's base cell at the top-left; the
+			-- layout's slots are reserved for the textures of attached pieces.
 			local fullTextureSize = originalTextureSize
 			if accommodateKitbash then
-				fullTextureSize = Vector2.new(
-					originalTextureSize.X * CreationConfig.atlasGridSize,
-					originalTextureSize.Y * CreationConfig.atlasGridSize
-				)
+				fullTextureSize = resolution
 				local kitbashAtlas = AssetService:CreateEditableImage({
 					Size = fullTextureSize,
 				})
@@ -776,22 +770,41 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		@param meshPart MeshPart -- the part to look up
 		@return Vector2 -- the drawable size for that part
 
-		For an accessory with a kitbash atlas this is the atlas cell, not the whole image, so
-		brushes stay inside the creation's own slot.
+		For a creation with an atlas this is its own base cell, not the whole image, so brushes stay
+		inside the creation's own slot.
 	]=]
 	function object:getTextureSize(meshPart: MeshPart): Vector2
 		local layerInfo = self.modelTextureInfo[meshPart]
 
 		local fullTextureSize = layerInfo.outputEditableImage.Size
 
-		if layerInfo.kitbashAtlasInfo then
-			return Vector2.new(
-				math.floor(fullTextureSize.X / CreationConfig.atlasGridSize),
-				math.floor(fullTextureSize.Y / CreationConfig.atlasGridSize)
-			)
+		if atlasLayout and layerInfo.kitbashAtlasInfo then
+			return select(2, AtlasUtil.toPixels(atlasLayout.base, fullTextureSize))
 		end
 
 		return fullTextureSize
+	end
+
+	--[=[
+		@within TextureInfo
+		@param meshPart MeshPart -- the part to look up
+		@return Vector2 -- the size of the part's whole color map, atlas included, which its UVs span
+	]=]
+	function object:getImageSize(meshPart: MeshPart): Vector2
+		return self.modelTextureInfo[meshPart].outputEditableImage.Size
+	end
+
+	--[=[
+		@within TextureInfo
+		@param meshPart MeshPart -- the part to look up
+		@param atlasSlot number -- index into the blank's atlas layout slots
+		@return Vector2 -- the slot's top-left pixel
+		@return Vector2 -- the slot's size in pixels
+	]=]
+	function object:getAtlasSlotRect(meshPart: MeshPart, atlasSlot: number): (Vector2, Vector2)
+		local layout = assert(atlasLayout, "This creation has no texture atlas")
+
+		return AtlasUtil.toPixels(layout.slots[atlasSlot], self.modelTextureInfo[meshPart].outputEditableImage.Size)
 	end
 
 	--[=[
@@ -907,14 +920,13 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	--[=[
 		@within TextureInfo
 		@param meshPart MeshPart -- the part whose layer stack to touch
-		@param atlasSlot number -- index into `CreationConfig.atlasSlots`
+		@param atlasSlot number -- index into the blank's atlas layout slots
 
 		Erases one kitbash atlas cell from every paint layer, e.g. when the piece or accessory textured
 		by that cell is removed or swapped. Call [TextureInfo:updateOutputColorMap] afterwards.
 	]=]
 	function object:clearAtlasSlot(meshPart: MeshPart, atlasSlot: number)
-		local slotInfo = CreationConfig.atlasSlots[atlasSlot]
-		local slotScale = 1.0 / CreationConfig.atlasGridSize
+		local position, size = self:getAtlasSlotRect(meshPart, atlasSlot)
 
 		for _, paintLayer in self.paintLayers do
 			local paintImage = self:getPaintLayerImage(meshPart, paintLayer.id)
@@ -922,14 +934,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 				continue
 			end
 
-			local atlasSize = paintImage.Size
-			paintImage:DrawRectangle(
-				Vector2.new(atlasSize.X * slotInfo.uOffset, atlasSize.Y * slotInfo.vOffset),
-				Vector2.new(atlasSize.X * slotScale, atlasSize.Y * slotScale),
-				Color3.new(0, 0, 0),
-				1,
-				Enum.ImageCombineType.Overwrite
-			)
+			paintImage:DrawRectangle(position, size, Color3.new(0, 0, 0), 1, Enum.ImageCombineType.Overwrite)
 		end
 	end
 

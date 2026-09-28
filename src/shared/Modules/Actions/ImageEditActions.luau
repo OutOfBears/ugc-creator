@@ -9,6 +9,8 @@
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AtlasUtil = require("../Utils/AtlasUtil")
+local BrushTips = require(ReplicatedStorage.Shared.Data.BrushTips)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
 local GeometryUtil = require("../Utils/GeometryUtil")
@@ -72,6 +74,7 @@ export type LinearBrushActionMetadata = {
 	brushSize: number,
 	brushColor: Color3,
 	brushTransparency: number,
+	tipId: string?,
 	drawPositions: { Vector2 },
 }
 
@@ -137,6 +140,7 @@ export type ProjectionBrushActionMetadata = {
 	drawPositions: { Vector2 },
 	isReflectiveMode: boolean?,
 	brushTransparency: number?,
+	tipId: string?,
 	intermediateEditableImageBuffer: buffer,
 	cachedTargetImageBuffer: buffer,
 }
@@ -145,14 +149,16 @@ local ImageEditActions = {}
 
 -- An atlas creation paints into the top-left cell of its atlas, not the whole image.
 local function getSizeForTextureBuffer(modelInfo, colorMap: EditableImage): Vector2
-	if not modelInfo:getUsesAtlas() then
+	local atlasLayout = modelInfo:getAtlasLayout()
+	if not atlasLayout then
 		return colorMap.Size
 	end
 
-	return Vector2.new(
-		math.floor(colorMap.Size.X / CreationConfig.atlasGridSize),
-		math.floor(colorMap.Size.Y / CreationConfig.atlasGridSize)
-	)
+	return select(2, AtlasUtil.toPixels(atlasLayout.base, colorMap.Size))
+end
+
+local function isKnownTipId(tipId: any): boolean
+	return tipId == nil or (typeof(tipId) == "string" and BrushTips.tips[tipId] ~= nil)
 end
 
 local function getPaintLayerImage(modelInfo, meshPartName: string?, paintLayerId: any): EditableImage?
@@ -529,7 +535,7 @@ ImageEditActions.LinearBrushAction = {
 			return false
 		end
 
-		return true
+		return isKnownTipId(actionMetaData.tipId)
 	end,
 	executeAction = function(modelInfo, actionMetaData: LinearBrushActionMetadata)
 		local textureInfo = modelInfo:getTextureInfo()
@@ -547,17 +553,41 @@ ImageEditActions.LinearBrushAction = {
 
 		local prevBrushBuffer = brushLayer:ReadPixelsBuffer(rectPosition, rectSize)
 
-		local prevDrawPosition = #actionMetaData.drawPositions > 0 and actionMetaData.drawPositions[1] or nil
-		for _, drawPosition in pairs(actionMetaData.drawPositions) do
-			TextureUtils.drawCircleBetweenPoints(
-				prevDrawPosition,
-				drawPosition,
+		local isErasing = actionMetaData.brushTransparency >= 1
+		local stamp = if isErasing
+			then nil
+			else TextureUtils.createLinearStamp(
 				actionMetaData.brushSize,
 				actionMetaData.brushColor,
-				actionMetaData.brushTransparency,
-				brushLayer
+				actionMetaData.tipId
 			)
+
+		local prevDrawPosition = #actionMetaData.drawPositions > 0 and actionMetaData.drawPositions[1] or nil
+		for _, drawPosition in pairs(actionMetaData.drawPositions) do
+			if stamp then
+				TextureUtils.stampBetweenPoints(
+					prevDrawPosition,
+					drawPosition,
+					actionMetaData.brushSize,
+					actionMetaData.tipId,
+					stamp,
+					brushLayer
+				)
+			else
+				TextureUtils.drawCircleBetweenPoints(
+					prevDrawPosition,
+					drawPosition,
+					actionMetaData.brushSize,
+					actionMetaData.brushColor,
+					actionMetaData.brushTransparency,
+					brushLayer
+				)
+			end
 			prevDrawPosition = drawPosition
+		end
+
+		if stamp then
+			stamp:Destroy()
 		end
 
 		local currentRegionMap = textureInfo:getMeshPartRegion(actionMetaData.targetMeshPartName)
@@ -817,7 +847,8 @@ ImageEditActions.TiledStickerAction = {
 			actionMetaData.paintLayerId
 		)
 		local isAccessory = modelInfo:getCreationType() == CreationConfig.creationTypes.accessory
-		local kitbashingEnabled = modelInfo:getUsesAtlas()
+		local atlasLayout = modelInfo:getAtlasLayout()
+		local kitbashingEnabled = atlasLayout ~= nil
 
 		if not didCreateLayer then
 			TextureUtils.clear(stickerLayer)
@@ -869,8 +900,8 @@ ImageEditActions.TiledStickerAction = {
 		local upVec = Vector2.new(upVec3.X, upVec3.Y) * upScale
 		local rightVec = Vector2.new(rightVec3.X, rightVec3.Y) * rightScale
 
-		local layerSize = if kitbashingEnabled
-			then stickerLayer.Size / CreationConfig.atlasGridSize
+		local layerSize = if atlasLayout
+			then select(2, AtlasUtil.toPixels(atlasLayout.base, stickerLayer.Size))
 			else stickerLayer.Size
 
 		local leftLimit, rightLimit = getSideLengthFromNormal(actionMetaData.texturePosition, rightVec.Unit, layerSize)
@@ -1060,7 +1091,7 @@ ImageEditActions.ProjectionBrushAction = {
 			return false
 		end
 
-		return true
+		return isKnownTipId(actionMetaData.tipId)
 	end,
 	executeAction = function(modelInfo, actionMetaData: ProjectionBrushActionMetadata)
 		local referenceMeshPart = modelInfo:getMeshPartByName(actionMetaData.referenceMeshPartName)
@@ -1085,16 +1116,12 @@ ImageEditActions.ProjectionBrushAction = {
 			imageToDrawOn = intermediateEditableImage
 		end
 
-		local sourceAlpha = if not isErasing then 1.0 else 0.0
-		local targetAlpha = if not isErasing then 0.0 else 1.0
-
 		local projectionBrushCircleTexture, projectionBrushLineTexture, circleBrushConfig, lineBrushConfig =
 			TextureUtils.createAndSetupProjectionBrushTexturesAndConfigs(
-				sourceAlpha,
-				targetAlpha,
 				actionMetaData.brushColor,
 				actionMetaData.colorBlendType,
-				actionMetaData.alphaBlendType
+				actionMetaData.alphaBlendType,
+				actionMetaData.tipId
 			)
 
 		local pbrInfo, pbrBrushTextures = TextureUtils.generatePBRInfo(
@@ -1102,7 +1129,8 @@ ImageEditActions.ProjectionBrushAction = {
 			actionMetaData.isReflectiveMode,
 			textureInfo:getRoughnessMap(referenceMeshPart),
 			textureInfo:getMetalnessMap(referenceMeshPart),
-			textureInfo:getNormalMap(referenceMeshPart)
+			textureInfo:getNormalMap(referenceMeshPart),
+			actionMetaData.tipId
 		)
 
 		local meshInfo = modelInfo:getMeshInfo()
