@@ -1,7 +1,4 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local AttachmentUtils = require("../Utils/AttachmentUtils")
-local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local MeshInfo = require("../MeshInfo")
 local MeshUtils = require("../Utils/MeshUtils")
 local MeshWidgetUtils = require("../Utils/MeshWidgetUtils")
@@ -246,30 +243,7 @@ local UnmergeKitbashPieceAction: ActionProcessor<UnmergeKitbashPieceActionMetada
 
 		if actionMetaData.atlasSlot then
 			local textureInfo = modelInfo:getTextureInfo()
-
-			for _, paintLayer in textureInfo:getPaintLayers() do
-				local paintImage = textureInfo:getPaintLayerImage(targetMeshPart, paintLayer.id)
-				if not paintImage then
-					continue
-				end
-
-				local atlasSize = paintImage.Size
-				local slotInfo = CreationConfig.atlasSlots[actionMetaData.atlasSlot]
-				local slotScale = 1.0 / CreationConfig.atlasGridSize
-				local slotWidth = atlasSize.X * slotScale
-				local slotHeight = atlasSize.Y * slotScale
-				local slotX = atlasSize.X * slotInfo.uOffset
-				local slotY = atlasSize.Y * slotInfo.vOffset
-
-				paintImage:DrawRectangle(
-					Vector2.new(slotX, slotY),
-					Vector2.new(slotWidth, slotHeight),
-					Color3.new(0, 0, 0),
-					1,
-					Enum.ImageCombineType.Overwrite
-				)
-			end
-
+			textureInfo:clearAtlasSlot(targetMeshPart, actionMetaData.atlasSlot)
 			textureInfo:updateOutputColorMap(targetMeshPart)
 		end
 	end,

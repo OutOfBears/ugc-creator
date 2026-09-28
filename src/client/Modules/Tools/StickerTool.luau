@@ -205,7 +205,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 	object.modelInfo = modelInfo
 	object.isAccessory = modelInfo:getCreationType() == CreationConfig.creationTypes.accessory
-	object.enableKitbashing = modelInfo:getKitbashingEnabled()
+	object.enableKitbashing = modelInfo:getUsesAtlas()
 	object.inputManager = inputManager
 
 	object.currentlySelectedSticker = 0

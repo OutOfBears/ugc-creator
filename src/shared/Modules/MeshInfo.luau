@@ -717,7 +717,7 @@ local function MeshInfo(model: Model, blank: Blanks.Blank): MeshInfo
 	local object = {} :: MeshInfo
 
 	object.maid = maid
-	object.modelMeshInfo = setupModelMeshes(maid, model, blank.individualPartsNames, blank.enableKitbashing)
+	object.modelMeshInfo = setupModelMeshes(maid, model, blank.individualPartsNames, Blanks.usesAtlas(blank))
 	object.widgetInfo = buildWidgetInfo(model, blank.meshEditControlGroups, object.modelMeshInfo)
 
 	--[=[

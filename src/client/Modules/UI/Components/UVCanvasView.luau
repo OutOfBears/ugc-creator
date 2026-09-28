@@ -11,7 +11,6 @@ export type UVCanvasView = {
 	frame: Frame,
 	content: Frame,
 	backdrop: ImageLabel,
-	underlay: Frame,
 	textureImage: ImageLabel,
 	wireframeImage: ImageLabel,
 	handleParent: Frame,
@@ -76,14 +75,6 @@ local function UVCanvasView(): UVCanvasView
 		Interactable = false,
 	}) :: ImageLabel
 
-	object.underlay = Create("Frame", {
-		Name = "Underlay",
-		BackgroundTransparency = 1,
-		Size = UDim2.fromScale(1, 1),
-		ZIndex = 1,
-		Interactable = false,
-	}) :: Frame
-
 	object.textureImage = Create("ImageLabel", {
 		Name = "Texture",
 		BackgroundTransparency = 1,
@@ -116,7 +107,6 @@ local function UVCanvasView(): UVCanvasView
 		ZIndex = 1,
 		Children = {
 			object.backdrop,
-			object.underlay,
 			object.textureImage,
 			object.wireframeImage,
 			object.handleParent,

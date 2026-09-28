@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AccessorySwapToolUI = require("./AccessorySwapToolUI")
 local BrushToolUI = require("./BrushToolUI")
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
@@ -45,6 +46,7 @@ export type EditingUI = {
 	stickerPatternToolUI: StickerPatternToolUI.StickerPatternToolUI,
 	kitbashToolUI: KitbashToolUI.KitbashToolUI,
 	layerColorToolUI: LayerColorToolUI.LayerColorToolUI?,
+	accessorySwapToolUI: AccessorySwapToolUI.AccessorySwapToolUI?,
 	layersToolUI: LayersToolUI.LayersToolUI,
 	uvCanvasUI: UVCanvasUI.UVCanvasUI,
 	canvasButtonGroup: Frame,
@@ -170,6 +172,10 @@ local function EditingUI(
 
 		if object.layerColorToolUI then
 			object.layerColorToolUI:close()
+		end
+
+		if object.accessorySwapToolUI then
+			object.accessorySwapToolUI:close()
 		end
 
 		object.layersToolUI:close()
@@ -306,24 +312,65 @@ local function EditingUI(
 	end
 
 	local function createLayerColorToolUI()
-		local catalog = object.session.modelInfo:getLayerCatalog()
+		local modelInfo = object.session.modelInfo
+		local catalog = modelInfo:getLayerCatalog()
 		if not catalog then
 			return
 		end
 
+		local getColorGroups = function()
+			local colorGroups: { LayerColorToolUI.ColorGroup } = { { keyPrefix = "", catalog = catalog } }
+
+			local accessoryCatalog = modelInfo:getAccessoryCatalog()
+			if accessoryCatalog then
+				for _, slot in accessoryCatalog.slots do
+					local option = modelInfo:getSelectedAccessory(slot.name)
+					if option then
+						table.insert(colorGroups, { keyPrefix = `{slot.name}.`, catalog = option.colors })
+					end
+				end
+			end
+
+			return colorGroups
+		end
 		local sectionColorChanged = function(sectionName, color, opacity, isFinalInput)
 			object.layerColorTool:applySectionColor(sectionName, color, opacity, isFinalInput)
-			object.uvCanvasUI:refreshUnderlay()
 		end
 		local variantSelected = function(groupName, optionIndex)
 			object.layerColorTool:selectVariant(groupName, optionIndex)
-			object.uvCanvasUI:refreshUnderlay()
 		end
 		local deleteCallback = function() end
 
-		object.layerColorToolUI =
-			maid:add(LayerColorToolUI(onClosePanel, deleteCallback, catalog, sectionColorChanged, variantSelected))
+		object.layerColorToolUI = maid:add(
+			LayerColorToolUI(onClosePanel, deleteCallback, getColorGroups, sectionColorChanged, variantSelected)
+		)
 		object.layerColorToolUI.panel.frame.Parent = object.panelParent
+	end
+
+	local function createAccessorySwapToolUI()
+		local modelInfo = object.session.modelInfo
+		local catalog = modelInfo:getAccessoryCatalog()
+		local accessorySwapTool = object.session.accessorySwapTool
+		if not catalog or not accessorySwapTool then
+			return
+		end
+
+		local getSelections = function()
+			return modelInfo:getAccessorySelections()
+		end
+		local optionSelected = function(slotName, optionIndex)
+			local swapped = accessorySwapTool:selectOption(slotName, optionIndex)
+			if swapped and object.layerColorToolUI then
+				object.layerColorToolUI:refresh()
+			end
+
+			return swapped
+		end
+		local deleteCallback = function() end
+
+		object.accessorySwapToolUI =
+			maid:add(AccessorySwapToolUI(onClosePanel, deleteCallback, catalog, getSelections, optionSelected))
+		object.accessorySwapToolUI.panel.frame.Parent = object.panelParent
 	end
 
 	local function createStickerToolUI()
@@ -520,12 +567,28 @@ local function EditingUI(
 			},
 		}
 
+		local accessoryGroup = {
+			{
+				iconId = CreationIcons.icons.Accessories,
+				callback = function()
+					onOpenPanel()
+					object.accessorySwapToolUI:open()
+					object.session:panToLeft()
+					attachCanvas(object.accessorySwapToolUI.panel.frame, "view")
+				end,
+			},
+		}
+
 		local toolbarGroups = {
 			paintingGroup,
 			if hasLayerCatalog then layerColorGroup else fillGroup,
 			stickerGroup,
 			layersGroup,
 		}
+
+		if object.accessorySwapToolUI then
+			table.insert(toolbarGroups, accessoryGroup)
+		end
 
 		if object.session.modelInfo:getKitbashingEnabled() then
 			table.insert(toolbarGroups, kitbashGroup)
@@ -586,6 +649,7 @@ local function EditingUI(
 	createStickerToolUI()
 	createStickerPatternToolUI()
 	createKitbashToolUI()
+	createAccessorySwapToolUI()
 	object.layersToolUI = maid:add(LayersToolUI(onClosePanel, object.layersTool))
 	object.layersToolUI.panel.frame.Parent = object.panelParent
 

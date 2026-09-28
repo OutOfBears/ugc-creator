@@ -248,8 +248,8 @@ end
 	@param params MergeKitbashParams -- the piece to merge and where to put it
 	@return { number } -- the face ids added to the target mesh, so the merge can be undone
 
-	Merges a kitbash piece into the target mesh: copies its geometry across, draws its texture into
-	the target's atlas slot, and remaps the copied UVs onto that slot.
+	Merges a kitbash piece into the target mesh: copies its geometry across, draws its texture (if
+	any) into the target's atlas slot, and remaps the copied UVs onto that slot.
 ]=]
 local function mergeKitbashPiece(params: MergeKitbashParams): { number }
 	local targetMeshPart = params.targetMeshPart
@@ -315,7 +315,8 @@ local function mergeKitbashPiece(params: MergeKitbashParams): { number }
 		end
 	end
 
-	if hasKitbashTexture and params.atlasSlot then
+	local remapsUVs = params.atlasSlot ~= nil
+	if params.atlasSlot then
 		local kitbashUVs = kitbashEditableMesh:GetUVs()
 		local slotInfo = CreationConfig.atlasSlots[params.atlasSlot]
 		local slotScale = 1.0 / CreationConfig.atlasGridSize
@@ -341,7 +342,7 @@ local function mergeKitbashPiece(params: MergeKitbashParams): { number }
 			newVertices[i] = vertexIdMap[oldVertexId]
 		end
 
-		if hasKitbashTexture then
+		if remapsUVs then
 			for i, oldUVId in oldUVs do
 				newUVs[i] = uvIdMap[oldUVId]
 			end
@@ -350,7 +351,7 @@ local function mergeKitbashPiece(params: MergeKitbashParams): { number }
 		if #newVertices == 3 then
 			local newFaceId = targetEditableMesh:AddTriangle(newVertices[1], newVertices[2], newVertices[3])
 
-			if hasKitbashTexture and #newUVs == 3 then
+			if remapsUVs and #newUVs == 3 then
 				targetEditableMesh:SetFaceUVs(newFaceId, newUVs)
 			end
 

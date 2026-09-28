@@ -143,9 +143,9 @@ export type ProjectionBrushActionMetadata = {
 
 local ImageEditActions = {}
 
--- A kitbashable creation paints into the top-left cell of its atlas, not the whole image.
+-- An atlas creation paints into the top-left cell of its atlas, not the whole image.
 local function getSizeForTextureBuffer(modelInfo, colorMap: EditableImage): Vector2
-	if not modelInfo:getKitbashingEnabled() then
+	if not modelInfo:getUsesAtlas() then
 		return colorMap.Size
 	end
 
@@ -243,21 +243,40 @@ ImageEditActions.RecolorAction = {
 	@within ImageEditActions
 	@prop RecolorSectionAction ImageEditAction
 
-	Records the chosen color and opacity for one named layer section. The color is stored on the
-	model (compositing is done by LayerColorCompositor from this state), so this only validates and
-	saves — it draws nothing itself.
+	Records the chosen color and opacity for one named layer section, then rebakes the atlas cell that
+	section is drawn into. Accessory sections are keyed `"<slot>.<section>"`.
 ]=]
 ImageEditActions.RecolorSectionAction = {
-	isValidAction = function(modelInfo, actionMetaData: RecolorSectionActionMetadata)
-		if actionMetaData.color == nil or actionMetaData.sectionName == nil then
+	isValidAction = function(modelInfo: ModelInfo.ModelInfo, actionMetaData: RecolorSectionActionMetadata)
+		if typeof(actionMetaData.color) ~= "Color3" or typeof(actionMetaData.sectionName) ~= "string" then
+			return false
+		end
+		if actionMetaData.opacity ~= nil and typeof(actionMetaData.opacity) ~= "number" then
 			return false
 		end
 
-		return modelInfo:getLayerCatalog() ~= nil
+		local catalog, _, name = modelInfo:resolveColorKey(actionMetaData.sectionName)
+		if not catalog then
+			return false
+		end
+
+		if table.find(catalog.sortOrder, name) then
+			return true
+		end
+		for _, group in catalog.variantGroups do
+			if group.name == name then
+				return true
+			end
+		end
+
+		return false
 	end,
 	executeAction = function(modelInfo: ModelInfo.ModelInfo, actionMetaData: RecolorSectionActionMetadata)
 		local opacity = if actionMetaData.opacity ~= nil then actionMetaData.opacity else 1
 		modelInfo:saveSectionColor(actionMetaData.sectionName, actionMetaData.color, 1 - opacity)
+
+		local _, cell = modelInfo:resolveColorKey(actionMetaData.sectionName)
+		modelInfo:bakeLayerColors(cell)
 	end,
 }
 
@@ -265,23 +284,27 @@ ImageEditActions.RecolorSectionAction = {
 	@within ImageEditActions
 	@prop SelectVariantAction ImageEditAction
 
-	Records which option of a variant group (e.g. which mouth) is selected. Stored on the model for
-	LayerColorCompositor to read at bake time.
+	Records which option of a variant group (e.g. which mouth) is selected, then rebakes the cell
+	that group is drawn into. Accessory groups are keyed `"<slot>.<group>"`.
 ]=]
 ImageEditActions.SelectVariantAction = {
-	isValidAction = function(modelInfo, actionMetaData: SelectVariantActionMetadata)
-		if actionMetaData.groupName == nil or actionMetaData.optionIndex == nil then
+	isValidAction = function(modelInfo: ModelInfo.ModelInfo, actionMetaData: SelectVariantActionMetadata)
+		local optionIndex = actionMetaData.optionIndex
+		if typeof(actionMetaData.groupName) ~= "string" or typeof(optionIndex) ~= "number" then
+			return false
+		end
+		if optionIndex % 1 ~= 0 then
 			return false
 		end
 
-		local catalog = modelInfo:getLayerCatalog()
+		local catalog, _, name = modelInfo:resolveColorKey(actionMetaData.groupName)
 		if not catalog then
 			return false
 		end
 
 		for _, group in catalog.variantGroups do
-			if group.name == actionMetaData.groupName then
-				return actionMetaData.optionIndex >= 1 and actionMetaData.optionIndex <= #group.options
+			if group.name == name then
+				return optionIndex >= 1 and optionIndex <= #group.options
 			end
 		end
 
@@ -289,6 +312,9 @@ ImageEditActions.SelectVariantAction = {
 	end,
 	executeAction = function(modelInfo: ModelInfo.ModelInfo, actionMetaData: SelectVariantActionMetadata)
 		modelInfo:saveVariantSelection(actionMetaData.groupName, actionMetaData.optionIndex)
+
+		local _, cell = modelInfo:resolveColorKey(actionMetaData.groupName)
+		modelInfo:bakeLayerColors(cell)
 	end,
 }
 
@@ -791,7 +817,7 @@ ImageEditActions.TiledStickerAction = {
 			actionMetaData.paintLayerId
 		)
 		local isAccessory = modelInfo:getCreationType() == CreationConfig.creationTypes.accessory
-		local kitbashingEnabled = modelInfo:getKitbashingEnabled()
+		local kitbashingEnabled = modelInfo:getUsesAtlas()
 
 		if not didCreateLayer then
 			TextureUtils.clear(stickerLayer)

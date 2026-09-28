@@ -2,10 +2,8 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
-local ColorLayers = require(ReplicatedStorage.Shared.Data.ColorLayers)
+local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local ImageEditActions = require(ReplicatedStorage.Shared.Modules.Actions.ImageEditActions)
-local LayerColorCompositor = require(ReplicatedStorage.Shared.Modules.LayerColorCompositor)
-local LayerDecalPreview = require(ReplicatedStorage.Shared.Modules.LayerDecalPreview)
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local ModelInfo = require(ReplicatedStorage.Shared.Modules.ModelInfo)
 local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
@@ -13,8 +11,7 @@ local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
 export type LayerColorTool = {
 	-- vars
 	modelInfo: ModelInfo.ModelInfo,
-	catalog: ColorLayers.Catalog,
-	preview: LayerDecalPreview.LayerDecalPreview,
+	lastBakeTime: number,
 	maid: Maid.Maid,
 	-- methods
 	applySectionColor: (
@@ -25,7 +22,7 @@ export type LayerColorTool = {
 		isFinalInput: boolean
 	) -> (),
 	selectVariant: (self: LayerColorTool, groupName: string, optionIndex: number) -> (),
-	composeFinalImage: (self: LayerColorTool) -> EditableImage,
+	composeFinalImage: (self: LayerColorTool) -> EditableImage?,
 	tryOn: (self: LayerColorTool) -> (),
 	destroy: (self: LayerColorTool) -> (),
 }
@@ -34,45 +31,34 @@ export type LayerColorTool = {
 	@class LayerColorTool
 	@client
 
-	Recolors a layered creation section by section. Each color change drives a live decal preview on
-	the edit model for instant feedback and is stored on the model through a `RecolorSection` action
-	(mirrored to the server on the final input of a drag). `tryOn` bakes the stored colors into one
-	image with [LayerColorCompositor] and applies it to the player's own head.
+	Recolors a layered creation section by section. Each color change is stored on the model through
+	a `RecolorSection` action, which bakes the tinted layers straight into the creation's color map;
+	while dragging, bakes are throttled to `CreationConfig.layerColorBakeInterval` and only the final
+	input is mirrored to the server.
 ]=]
 local function LayerColorTool(modelInfo: ModelInfo.ModelInfo): LayerColorTool
 	local maid = Maid.new()
 	local object = {} :: LayerColorTool
 
-	local catalog = modelInfo:getLayerCatalog()
-	assert(catalog, "LayerColorTool requires a blank with a layer catalog")
+	assert(modelInfo:getLayerCatalog(), "LayerColorTool requires a blank with a layer catalog")
 
 	object.modelInfo = modelInfo
-	object.catalog = catalog
+	object.lastBakeTime = 0
 	object.maid = maid
-
-	local targetPart = modelInfo:getMeshPartByName("Head") or modelInfo:getMeshParts()[1]
-	assert(targetPart, "LayerColorTool requires a mesh part to preview on")
-
-	local sourceMeshPart = modelInfo.blank.sourceModel:FindFirstChild(targetPart.Name, true)
-	assert(
-		sourceMeshPart and sourceMeshPart:IsA("MeshPart"),
-		`LayerColorTool could not find '{targetPart.Name}' in the blank's source model`
-	)
-
-	local paintImage = modelInfo:getTextureInfo():getOutputTextureByName(targetPart.Name)
-	object.preview = maid:add(LayerDecalPreview(targetPart, sourceMeshPart, catalog, paintImage))
-
-	local compositor: LayerColorCompositor.LayerColorCompositor? = nil
 
 	--[=[
 		@within LayerColorTool
-		@param sectionName string -- the catalog section (or variant group) being colored
+		@param sectionName string -- the section (or variant group) key being colored
 		@param color Color3 -- the chosen tint
 		@param opacity number -- 0 transparent to 1 opaque
 		@param isFinalInput boolean -- true on the last input of a drag, which is what mirrors to the server
 	]=]
 	function object:applySectionColor(sectionName: string, color: Color3, opacity: number, isFinalInput: boolean)
-		self.preview:setSectionColor(sectionName, color, 1 - opacity)
+		local now = os.clock()
+		if not isFinalInput and now - self.lastBakeTime < CreationConfig.layerColorBakeInterval then
+			return
+		end
+		self.lastBakeTime = now
 
 		local metadata: ImageEditActions.RecolorSectionActionMetadata = {
 			sectionName = sectionName,
@@ -90,36 +76,31 @@ local function LayerColorTool(modelInfo: ModelInfo.ModelInfo): LayerColorTool
 
 	--[=[
 		@within LayerColorTool
-		@param groupName string -- the variant group to switch
+		@param groupName string -- the variant group key to switch
 		@param optionIndex number -- the chosen 1-based option
 	]=]
 	function object:selectVariant(groupName: string, optionIndex: number)
-		self.preview:selectVariant(groupName, optionIndex)
-
 		local metadata: ImageEditActions.SelectVariantActionMetadata = {
 			groupName = groupName,
 			optionIndex = optionIndex,
 		}
 
 		local action = Actions.createAction(Actions.ActionTypes.SelectVariant, metadata)
-		Actions.executeAction(self.modelInfo, action)
-		Network.fire("SubmitAction", action)
+		if Actions.executeAction(self.modelInfo, action) then
+			Network.fire("SubmitAction", action)
+		end
 	end
 
 	--[=[
 		@within LayerColorTool
-		@return EditableImage -- the tinted layers with the brush and sticker paint on top
+		@return EditableImage? -- the baked color layers with the paint on top
 
-		Composes the final texture. The layer decals and paint decal are only an editing preview; this
-		is the single image a try-on or publish should apply.
+		The creation's merged color map — the single image a try-on or publish applies.
 	]=]
-	function object:composeFinalImage(): EditableImage
-		if not compositor then
-			compositor = maid:add(LayerColorCompositor(self.catalog))
-		end
-		assert(compositor, "compositor")
+	function object:composeFinalImage(): EditableImage?
+		local targetPart = self.modelInfo:getColorTargetPart()
 
-		return compositor:compose(self.modelInfo:getSectionColors(), self.modelInfo:getVariantSelections(), paintImage)
+		return if targetPart then self.modelInfo:getTextureInfo():getOutputTextureByName(targetPart.Name) else nil
 	end
 
 	--[=[
@@ -134,11 +115,12 @@ local function LayerColorTool(modelInfo: ModelInfo.ModelInfo): LayerColorTool
 		end
 
 		local head = character:FindFirstChild("Head")
-		if not head or not head:IsA("MeshPart") then
+		local image = self:composeFinalImage()
+		if not head or not head:IsA("MeshPart") or not image then
 			return
 		end
 
-		head.TextureContent = Content.fromObject(self:composeFinalImage())
+		head.TextureContent = Content.fromObject(image)
 	end
 
 	function object:destroy()

@@ -1,3 +1,4 @@
+local AccessoryActions = require("./Actions/AccessoryActions")
 local ImageEditActions = require("./Actions/ImageEditActions")
 local MeshEditActions = require("./Actions/MeshEditActions")
 local ModelInfo = require("./ModelInfo")
@@ -36,6 +37,8 @@ local ActionTypes = {
 	MergeKitbashPiece = "MergeKitbashPiece",
 	UnmergeKitbashPiece = "UnmergeKitbashPiece",
 	UpdateDeformedEditableMeshes = "UpdateDeformedEditableMeshes",
+
+	SelectAccessory = "SelectAccessory",
 }
 
 local ACTION_PROCESSOR_MAP = {
@@ -66,6 +69,8 @@ local ACTION_PROCESSOR_MAP = {
 	[ActionTypes.MergeKitbashPiece] = MeshEditActions.MergeKitbashPieceAction,
 	[ActionTypes.UnmergeKitbashPiece] = MeshEditActions.UnmergeKitbashPieceAction,
 	[ActionTypes.UpdateDeformedEditableMeshes] = MeshEditActions.UpdateDeformedEditableMeshesAction,
+
+	[ActionTypes.SelectAccessory] = AccessoryActions.SelectAccessoryAction,
 }
 
 --[=[

@@ -69,7 +69,6 @@ export type UVCanvasUI = {
 	isOpen: (self: UVCanvasUI) -> boolean,
 	selectLayerStack: (self: UVCanvasUI, meshPart: MeshPart) -> (),
 	setWireframeVisible: (self: UVCanvasUI, isVisible: boolean) -> (),
-	refreshUnderlay: (self: UVCanvasUI) -> (),
 	resolvePaintTarget: (self: UVCanvasUI, texel: Vector2) -> MeshPart?,
 	destroy: (self: UVCanvasUI) -> (),
 }
@@ -274,63 +273,6 @@ local function UVCanvasUI(
 				config.wireframeFacesPerYield
 			)
 		end)
-	end
-
-	local underlaySections: { [string]: ImageLabel } = {}
-	local underlayVariants: { [string]: { ImageLabel } } = {}
-
-	local function rebuildUnderlay()
-		object.view.underlay:ClearAllChildren()
-		table.clear(underlaySections)
-		table.clear(underlayVariants)
-
-		local catalog = object.modelInfo:getLayerCatalog()
-		local meshPart = object.selectedMeshPart
-		if not catalog or not meshPart then
-			return
-		end
-
-		local layerTarget = object.modelInfo:getMeshPartByName("Head") or object.modelInfo:getMeshParts()[1]
-		if not layerTarget or not getTextureInfo():meshPartsShareLayer(layerTarget, meshPart) then
-			return
-		end
-
-		local layersByName = {}
-		for _, layer in catalog.layers do
-			layersByName[layer.name] = layer
-		end
-
-		local zIndex = 0
-		local function addLayerImage(name: string, textureId: string): ImageLabel
-			zIndex += 1
-
-			return Create("ImageLabel", {
-				Name = name,
-				Image = textureId,
-				BackgroundTransparency = 1,
-				Size = UDim2.fromScale(1, 1),
-				ZIndex = zIndex,
-				Interactable = false,
-				Parent = object.view.underlay,
-			}) :: ImageLabel
-		end
-
-		for _, layerName in catalog.sortOrder do
-			local layer = layersByName[layerName]
-			if layer then
-				underlaySections[layerName] = addLayerImage(layerName, layer.textureId)
-			end
-		end
-
-		for _, group in catalog.variantGroups do
-			local images = {}
-			for _, option in group.options do
-				table.insert(images, addLayerImage(`{group.name}_{option.name}`, option.textureId))
-			end
-			underlayVariants[group.name] = images
-		end
-
-		object:refreshUnderlay()
 	end
 
 	local function updateStickerPlacement()
@@ -867,7 +809,6 @@ local function UVCanvasUI(
 			rebuildWireframe()
 		end
 
-		rebuildUnderlay()
 		updateStickerPlacement()
 	end
 
@@ -881,29 +822,6 @@ local function UVCanvasUI(
 
 		if isVisible and self:isOpen() then
 			rebuildWireframe()
-		end
-	end
-
-	--[=[
-		@within UVCanvasUI
-
-		Re-tints the layer-catalog underlay from the model's current section colors and variant
-		picks, so recoloring shows on the canvas live.
-	]=]
-	function object:refreshUnderlay()
-		local sectionColors = self.modelInfo:getSectionColors()
-		for name, image in underlaySections do
-			local sectionColor = sectionColors[name]
-			image.ImageColor3 = if sectionColor then sectionColor.color else Color3.new(1, 1, 1)
-			image.ImageTransparency = if sectionColor then sectionColor.alpha else 0
-		end
-
-		local variantSelections = self.modelInfo:getVariantSelections()
-		for groupName, images in underlayVariants do
-			local selectedIndex = variantSelections[groupName] or 1
-			for index, image in images do
-				image.Visible = index == selectedIndex
-			end
 		end
 	end
 

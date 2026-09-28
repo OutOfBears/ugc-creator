@@ -417,6 +417,9 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 
 			local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 			local textureSize = textureInfo:getTextureSize(raycastResult.meshPart)
+			if self.modelInfo:getUsesAtlas() then
+				textureCoord *= CreationConfig.atlasGridSize
+			end
 
 			local drawX = textureCoord.X * textureSize.X
 			local drawY = textureCoord.Y * textureSize.Y
@@ -616,6 +619,9 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 
 		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 		local textureSize = textureInfo:getTextureSize(raycastResult.meshPart)
+		if self.modelInfo:getUsesAtlas() then
+			textureCoord *= CreationConfig.atlasGridSize
+		end
 		local drawPosition = textureCoord * textureSize
 
 		local drawInfo: Brushes.DrawInfo = {

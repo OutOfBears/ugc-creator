@@ -25,7 +25,6 @@ type CachedImage = {
 export type LayerColorCompositor = {
 	-- vars
 	catalog: ColorLayers.Catalog,
-	editableImage: EditableImage,
 	maid: Maid.Maid,
 	-- methods
 	compose: (
@@ -34,6 +33,14 @@ export type LayerColorCompositor = {
 		variantSelections: VariantSelections,
 		overlay: EditableImage?
 	) -> EditableImage,
+	composeInto: (
+		self: LayerColorCompositor,
+		target: EditableImage,
+		origin: Vector2,
+		sectionColors: SectionColors,
+		variantSelections: VariantSelections,
+		keyPrefix: string?
+	) -> (),
 	getEditableImage: (self: LayerColorCompositor) -> EditableImage,
 	destroy: (self: LayerColorCompositor) -> (),
 }
@@ -76,8 +83,9 @@ end
 
 	Composites a stack of tinted section PNGs into one EditableImage. Each section is drawn in the
 	catalog's `sortOrder`, tinted by its chosen color and skipped when fully transparent; one option
-	per variant group (e.g. the mouth) is drawn on top. Every source PNG is preloaded once and cached
-	cropped to its opaque bounds, so [LayerColorCompositor:compose] only touches pixels that matter.
+	per variant group (e.g. the mouth) is drawn on top. Every source PNG is preloaded once, resampled
+	to `resolution` when its size differs, and cached cropped to its opaque bounds, so composing only
+	touches pixels that matter.
 ]=]
 local function LayerColorCompositor(catalog: ColorLayers.Catalog, resolution: Vector2?): LayerColorCompositor
 	local maid = Maid.new()
@@ -111,6 +119,19 @@ local function LayerColorCompositor(catalog: ColorLayers.Catalog, resolution: Ve
 			return
 		end
 
+		if sourceImage.Size ~= canvasSize then
+			local resampled = AssetService:CreateEditableImage({ Size = canvasSize })
+			if not resampled then
+				sourceImage:Destroy()
+				throwMemoryError()
+				return
+			end
+
+			resampled:DrawImageTransformed(canvasSize / 2, canvasSize / sourceImage.Size, 0, sourceImage)
+			sourceImage:Destroy()
+			sourceImage = resampled
+		end
+
 		local fullPixels = sourceImage:ReadPixelsBuffer(Vector2.zero, sourceImage.Size)
 		local position, size = getOpaqueBounds(sourceImage.Size, fullPixels)
 
@@ -136,15 +157,20 @@ local function LayerColorCompositor(catalog: ColorLayers.Catalog, resolution: Ve
 		end
 	end
 
-	local sharedImage = AssetService:CreateEditableImage({ Size = canvasSize })
-	if not sharedImage then
-		throwMemoryError()
+	local sharedImage: EditableImage? = nil
+	local sharedBuffer = buffer.create(canvasSize.X * canvasSize.Y * 4)
+
+	local function getSharedImage(): EditableImage
+		if not sharedImage then
+			sharedImage = AssetService:CreateEditableImage({ Size = canvasSize })
+			if not sharedImage then
+				throwMemoryError()
+			end
+			maid:add(sharedImage)
+		end
+
+		return sharedImage :: EditableImage
 	end
-
-	object.editableImage = sharedImage
-	maid:add(sharedImage)
-
-	local sharedBuffer = sharedImage:ReadPixelsBuffer(Vector2.zero, canvasSize)
 
 	local function drawSection(textureId: string, color: Color3)
 		local cached = cache[textureId]
@@ -153,6 +179,44 @@ local function LayerColorCompositor(catalog: ColorLayers.Catalog, resolution: Ve
 		end
 
 		TextureUtils.blitTintedAlphaOver(sharedBuffer, canvasSize.X, cached.buffer, cached.size, cached.position, color)
+	end
+
+	local function paint(
+		sectionColors: SectionColors,
+		variantSelections: VariantSelections,
+		keyPrefix: string,
+		background: number
+	)
+		buffer.fill(sharedBuffer, 0, background)
+
+		for _, layerName in catalog.sortOrder do
+			local layer = layersByName[layerName]
+			if not layer then
+				continue
+			end
+
+			local sectionColor = sectionColors[keyPrefix .. layerName]
+			if sectionColor and sectionColor.alpha >= 1 then
+				continue
+			end
+
+			drawSection(layer.textureId, if sectionColor then sectionColor.color else Color3.new(1, 1, 1))
+		end
+
+		for _, group in catalog.variantGroups do
+			local selectedIndex = variantSelections[keyPrefix .. group.name] or 1
+			local groupOption = group.options[selectedIndex]
+			if not groupOption then
+				continue
+			end
+
+			local sectionColor = sectionColors[keyPrefix .. group.name]
+			if sectionColor and sectionColor.alpha >= 1 then
+				continue
+			end
+
+			drawSection(groupOption.textureId, if sectionColor then sectionColor.color else Color3.new(1, 1, 1))
+		end
 	end
 
 	--[=[
@@ -171,46 +235,40 @@ local function LayerColorCompositor(catalog: ColorLayers.Catalog, resolution: Ve
 		variantSelections: VariantSelections,
 		overlay: EditableImage?
 	): EditableImage
-		buffer.fill(sharedBuffer, 0, 0)
+		paint(sectionColors, variantSelections, "", 0)
 
-		for _, layerName in catalog.sortOrder do
-			local layer = layersByName[layerName]
-			if not layer then
-				continue
-			end
-
-			local sectionColor = sectionColors[layerName]
-			if sectionColor and sectionColor.alpha >= 1 then
-				continue
-			end
-
-			drawSection(layer.textureId, if sectionColor then sectionColor.color else Color3.new(1, 1, 1))
-		end
-
-		for _, group in catalog.variantGroups do
-			local selectedIndex = variantSelections[group.name] or 1
-			local groupOption = group.options[selectedIndex]
-			if not groupOption then
-				continue
-			end
-
-			local sectionColor = sectionColors[group.name]
-			if sectionColor and sectionColor.alpha >= 1 then
-				continue
-			end
-
-			drawSection(groupOption.textureId, if sectionColor then sectionColor.color else Color3.new(1, 1, 1))
-		end
-
-		sharedImage:WritePixelsBuffer(Vector2.zero, canvasSize, sharedBuffer)
+		local image = getSharedImage()
+		image:WritePixelsBuffer(Vector2.zero, canvasSize, sharedBuffer)
 
 		if overlay then
-			sharedImage:DrawImageTransformed(canvasSize / 2, canvasSize / overlay.Size, 0, overlay, {
+			image:DrawImageTransformed(canvasSize / 2, canvasSize / overlay.Size, 0, overlay, {
 				CombineType = Enum.ImageCombineType.BlendSourceOver,
 			})
 		end
 
-		return sharedImage
+		return image
+	end
+
+	--[=[
+		@within LayerColorCompositor
+		@param target EditableImage -- the image to paint into, e.g. a creation's base atlas
+		@param origin Vector2 -- top-left pixel of the `resolution`-sized cell to overwrite
+		@param sectionColors { [string]: { color: Color3, alpha: number } } -- color and alpha per section/group key
+		@param variantSelections { [string]: number } -- chosen option index per variant group key
+		@param keyPrefix string? -- prepended to section and group names when reading the two maps
+
+		Overwrites one cell of `target` with the composed layers over an opaque white background, the
+		same fill a normal blank's color map starts from.
+	]=]
+	function object:composeInto(
+		target: EditableImage,
+		origin: Vector2,
+		sectionColors: SectionColors,
+		variantSelections: VariantSelections,
+		keyPrefix: string?
+	)
+		paint(sectionColors, variantSelections, keyPrefix or "", 255)
+		target:WritePixelsBuffer(origin, canvasSize, sharedBuffer)
 	end
 
 	--[=[
@@ -218,7 +276,7 @@ local function LayerColorCompositor(catalog: ColorLayers.Catalog, resolution: Ve
 		@return EditableImage -- the shared composite image
 	]=]
 	function object:getEditableImage(): EditableImage
-		return sharedImage
+		return getSharedImage()
 	end
 
 	function object:destroy()

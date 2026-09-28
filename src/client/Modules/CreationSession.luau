@@ -3,6 +3,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
+local AccessorySwapTool = require("./Tools/AccessorySwapTool")
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
 local BaseUI = require("./UI/Handlers/BaseUI")
 local BrushTool = require("./Tools/BrushTool")
@@ -37,6 +38,7 @@ export type CreationSession = {
 	kitbashTool: KitbashTool.KitbashTool,
 	previewTool: PreviewTool.PreviewTool?,
 	layerColorTool: LayerColorTool.LayerColorTool?,
+	accessorySwapTool: AccessorySwapTool.AccessorySwapTool?,
 	layersTool: LayersTool.LayersTool,
 	baseUI: BaseUI.BaseUI,
 	editMode: number,
@@ -286,6 +288,10 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 
 	if modelInfo:getLayerCatalog() then
 		object.layerColorTool = maid:add(LayerColorTool(modelInfo))
+	end
+
+	if modelInfo:getAccessoryCatalog() then
+		object.accessorySwapTool = maid:add(AccessorySwapTool(modelInfo))
 	end
 
 	object.baseUI = maid:add(

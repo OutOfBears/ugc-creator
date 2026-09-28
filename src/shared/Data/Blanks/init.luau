@@ -16,6 +16,7 @@ export type BlankDefinition = {
 	enableRegionalStickerPatterning: boolean?,
 
 	layerCatalogName: string?,
+	accessoryCatalogName: string?,
 
 	initialYaw: number?,
 	initialZOffset: number,
@@ -76,7 +77,9 @@ local DEFINITIONS: { BlankDefinition } = {
 	{
 		name = "FoxModel",
 		creationType = CreationConfig.creationTypes.body,
+		avatarAssetType = Enum.AvatarAssetType.Hat,
 		layerCatalogName = "Fox",
+		accessoryCatalogName = "Fox",
 
 		initialYaw = 90,
 		initialZOffset = 2,
@@ -189,6 +192,11 @@ function Blanks.get(name: string): Blank?
 		assertAccessoryShape(definition, sourceModel)
 	end
 
+	assert(
+		not (definition.enableKitbashing and definition.accessoryCatalogName),
+		`Blank '{definition.name}' enables both kitbashing and accessory swapping; they share the atlas cells.`
+	)
+
 	local blank: Blank = table.clone(definition) :: any
 	blank.sourceModel = sourceModel
 	blank.meshEditControlGroups = meshEditControlGroups
@@ -199,6 +207,15 @@ function Blanks.get(name: string): Blank?
 	resolved[name] = blank
 
 	return blank
+end
+
+--[=[
+	@within Blanks
+	@param definition BlankDefinition -- the blank to check
+	@return boolean -- true if its color map is a kitbash atlas (own texture in the top-left cell)
+]=]
+function Blanks.usesAtlas(definition: BlankDefinition): boolean
+	return definition.enableKitbashing == true or definition.accessoryCatalogName ~= nil
 end
 
 --[=[
