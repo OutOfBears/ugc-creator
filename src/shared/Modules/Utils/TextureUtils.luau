@@ -29,6 +29,11 @@ export type PBRChannelInfo = {
 
 export type PBRInfo = { [string]: PBRChannelInfo }
 
+export type PixelRect = {
+	position: Vector2,
+	size: Vector2,
+}
+
 -- The top-left editable cell matches CreationConfig.pbrMapCellSize; a body uses that full image,
 -- while an accessory packs a grid atlas so its backing image is cell x atlasGridSize per axis.
 local function getPbrAtlasCellSize(pbrMap: EditableImage): Vector2
@@ -318,6 +323,10 @@ end
 	@param targetAlpha number -- multiplier applied to every pixel's alpha
 ]=]
 local function applyAlpha(editableImage: EditableImage, targetAlpha: number)
+	if targetAlpha >= 1 then
+		return
+	end
+
 	local size = editableImage.Size
 
 	local eiBuffer = editableImage:ReadPixelsBuffer(Vector2.zero, size)
@@ -328,6 +337,81 @@ local function applyAlpha(editableImage: EditableImage, targetAlpha: number)
 	end
 
 	editableImage:WritePixelsBuffer(Vector2.zero, size, eiBuffer)
+end
+
+--[=[
+	@within TextureUtils
+	@param mask buffer -- RGBA pixels of a low-res image the same edit was drawn into
+	@param maskSize Vector2 -- width and height of the mask in pixels
+	@param imageSize Vector2 -- size of the full-res image the mask stands in for
+	@return { PixelRect } -- full-res rects covering every marked mask pixel, grown by one mask pixel
+
+	Turns a coarse coverage mask into the full-res regions an edit touched. The one-pixel margin
+	covers edges the coarse raster missed.
+]=]
+local function getMaskDirtyRects(mask: buffer, maskSize: Vector2, imageSize: Vector2): { PixelRect }
+	local columns, rows = maskSize.X, maskSize.Y
+	local dirty: { [number]: boolean } = {}
+	local anyDirty = false
+
+	for y = 0, rows - 1 do
+		for x = 0, columns - 1 do
+			if buffer.readu8(mask, (y * columns + x) * 4 + 3) > 0 then
+				anyDirty = true
+				for tileY = math.max(y - 1, 0), math.min(y + 1, rows - 1) do
+					for tileX = math.max(x - 1, 0), math.min(x + 1, columns - 1) do
+						dirty[tileY * columns + tileX] = true
+					end
+				end
+			end
+		end
+	end
+
+	local rects = {}
+	if not anyDirty then
+		return rects
+	end
+
+	local tileRects = {}
+	local openRects = {}
+	for y = 0, rows - 1 do
+		local nextOpenRects = {}
+		local x = 0
+		while x < columns do
+			if not dirty[y * columns + x] then
+				x += 1
+				continue
+			end
+
+			local startX = x
+			while x < columns and dirty[y * columns + x] do
+				x += 1
+			end
+
+			local key = startX * (columns + 1) + x
+			local tileRect = openRects[key]
+			if tileRect then
+				tileRect.endY = y + 1
+			else
+				tileRect = { startX = startX, endX = x, startY = y, endY = y + 1 }
+				table.insert(tileRects, tileRect)
+			end
+			nextOpenRects[key] = tileRect
+		end
+		openRects = nextOpenRects
+	end
+
+	local scaleX = imageSize.X / columns
+	local scaleY = imageSize.Y / rows
+	for _, tileRect in tileRects do
+		local left = math.floor(tileRect.startX * scaleX)
+		local top = math.floor(tileRect.startY * scaleY)
+		local right = math.min(math.ceil(tileRect.endX * scaleX), imageSize.X)
+		local bottom = math.min(math.ceil(tileRect.endY * scaleY), imageSize.Y)
+		table.insert(rects, { position = Vector2.new(left, top), size = Vector2.new(right - left, bottom - top) })
+	end
+
+	return rects
 end
 
 --[=[
@@ -941,6 +1025,7 @@ return {
 	performRegionStencil = performRegionStencil,
 	regionContainsPixel = regionContainsPixel,
 	applyAlpha = applyAlpha,
+	getMaskDirtyRects = getMaskDirtyRects,
 	blitTintedAlphaOver = blitTintedAlphaOver,
 	getRoughnessMaps = getRoughnessMaps,
 	getMetalnessMaps = getMetalnessMaps,

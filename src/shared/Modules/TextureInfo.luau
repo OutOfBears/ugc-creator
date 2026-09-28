@@ -1,5 +1,6 @@
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Blanks = require(ReplicatedStorage.Shared.Data.Blanks)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
@@ -85,6 +86,7 @@ export type TextureInfo = {
 	removeLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> (),
 	hasLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> boolean,
 	updateOutputColorMap: (self: TextureInfo, meshPart: MeshPart) -> (),
+	flushOutputColorMap: (self: TextureInfo, meshPart: MeshPart) -> (),
 	clearAtlasSlot: (self: TextureInfo, meshPart: MeshPart, atlasSlot: number) -> (),
 	getPaintLayers: (self: TextureInfo) -> { PaintLayer },
 	getPaintLayer: (self: TextureInfo, layerId: string) -> PaintLayer?,
@@ -118,6 +120,9 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	object.creationType = blankData.creationType
 	object.individualPartsNames = blankData.individualPartsNames
 	object.enableKitbashing = Blanks.usesAtlas(blankData)
+
+	local pendingFrameUpdates: { [LayerInfo]: boolean } = {}
+	local frameUpdateConnection: RBXScriptConnection? = nil
 
 	local function getBlendScratchImage(size: Vector2, fillColor: Color3, fillTransparency: number): EditableImage?
 		local key = `{size.X}x{size.Y}`
@@ -213,6 +218,25 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			if #group > 0 then
 				blendPaintLayerGroup(outputImage, group, paintLayer.blendMode)
 			end
+		end
+	end
+
+	local function runFrameUpdates()
+		frameUpdateConnection = nil
+
+		local layerInfos = table.clone(pendingFrameUpdates)
+		table.clear(pendingFrameUpdates)
+
+		for layerInfo in layerInfos do
+			doMergeDownLayers(layerInfo)
+		end
+	end
+
+	local function scheduleFrameUpdate(layerInfo: LayerInfo)
+		pendingFrameUpdates[layerInfo] = true
+
+		if not frameUpdateConnection then
+			frameUpdateConnection = RunService.PreRender:Once(runFrameUpdates)
 		end
 	end
 
@@ -851,9 +875,32 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		@param meshPart MeshPart -- the part whose color map to rebuild
 
 		Merges the part's input layers back down into the output image the SurfaceAppearance reads.
+		The server merges immediately; the client merges at most once per frame.
 	]=]
 	function object:updateOutputColorMap(meshPart: MeshPart)
 		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
+
+		if not RunService:IsClient() then
+			doMergeDownLayers(layerInfo)
+			return
+		end
+
+		scheduleFrameUpdate(layerInfo)
+	end
+
+	--[=[
+		@within TextureInfo
+		@param meshPart MeshPart -- the part whose output image is about to be read
+
+		Brings the part's output image up to date right away. Call it before reading the output.
+	]=]
+	function object:flushOutputColorMap(meshPart: MeshPart)
+		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
+		if not pendingFrameUpdates[layerInfo] then
+			return
+		end
+
+		pendingFrameUpdates[layerInfo] = nil
 		doMergeDownLayers(layerInfo)
 	end
 
@@ -1123,6 +1170,12 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	end
 
 	function object:destroy()
+		if frameUpdateConnection then
+			frameUpdateConnection:Disconnect()
+			frameUpdateConnection = nil
+		end
+		table.clear(pendingFrameUpdates)
+
 		for _, layerInfo in pairs(self.modelTextureInfo) do
 			for _, layer in layerInfo.inputLayers do
 				layer.editableImage:Destroy()

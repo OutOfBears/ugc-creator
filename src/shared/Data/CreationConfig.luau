@@ -112,6 +112,7 @@ export type CreationConfig = {
 	reopenDebounceSeconds: number,
 
 	layerColorBakeInterval: number,
+	projectionDirtyTileSize: number,
 
 	projectionEnabled: boolean,
 	visualizeServerEdits: boolean,
@@ -289,6 +290,7 @@ local config: CreationConfig = {
 	reopenDebounceSeconds = 3,
 
 	layerColorBakeInterval = 1 / 15,
+	projectionDirtyTileSize = 8,
 
 	projectionEnabled = true,
 	visualizeServerEdits = false,

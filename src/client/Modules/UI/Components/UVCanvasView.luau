@@ -11,7 +11,9 @@ export type UVCanvasView = {
 	frame: Frame,
 	content: Frame,
 	backdrop: ImageLabel,
-	textureImage: ImageLabel,
+	textureStack: Frame,
+	textureImages: { ImageLabel },
+	cellSize: Vector2,
 	wireframeImage: ImageLabel,
 	handleParent: Frame,
 	cursor: Frame,
@@ -20,7 +22,7 @@ export type UVCanvasView = {
 	pan: Vector2,
 	maid: Maid.Maid,
 	-- methods
-	setImage: (self: UVCanvasView, editableImage: EditableImage, cellSize: Vector2) -> (),
+	setImages: (self: UVCanvasView, editableImages: { EditableImage }, cellSize: Vector2?) -> (),
 	setWireframe: (self: UVCanvasView, editableImage: EditableImage?) -> (),
 	setWireframeVisible: (self: UVCanvasView, isVisible: boolean) -> (),
 	containsPoint: (self: UVCanvasView, screenPos: Vector2) -> boolean,
@@ -51,6 +53,8 @@ local function UVCanvasView(): UVCanvasView
 
 	object.maid = maid
 	object.textureSize = Vector2.one
+	object.textureImages = {}
+	object.cellSize = Vector2.one
 	object.zoom = 1
 	object.pan = Vector2.zero
 
@@ -75,14 +79,13 @@ local function UVCanvasView(): UVCanvasView
 		Interactable = false,
 	}) :: ImageLabel
 
-	object.textureImage = Create("ImageLabel", {
+	object.textureStack = Create("Frame", {
 		Name = "Texture",
 		BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1),
-		ResampleMode = Enum.ResamplerMode.Pixelated,
 		ZIndex = 2,
 		Interactable = false,
-	}) :: ImageLabel
+	}) :: Frame
 
 	object.wireframeImage = Create("ImageLabel", {
 		Name = "Wireframe",
@@ -107,7 +110,7 @@ local function UVCanvasView(): UVCanvasView
 		ZIndex = 1,
 		Children = {
 			object.backdrop,
-			object.textureImage,
+			object.textureStack,
 			object.wireframeImage,
 			object.handleParent,
 		},
@@ -150,16 +153,45 @@ local function UVCanvasView(): UVCanvasView
 
 	--[=[
 		@within UVCanvasView
-		@param editableImage EditableImage -- the texture to show, shown live as it is painted
-		@param cellSize Vector2 -- the region of the image to show from its top-left, in pixels
-	]=]
-	function object:setImage(editableImage: EditableImage, cellSize: Vector2)
-		self.textureImage.ImageContent = Content.fromObject(editableImage)
-		self.textureImage.ImageRectOffset = Vector2.zero
-		self.textureImage.ImageRectSize = cellSize
-		self.textureSize = cellSize
+		@param editableImages { EditableImage } -- the textures to stack bottom to top, shown live as they are painted
+		@param cellSize Vector2? -- the region of each image to show from its top-left, in pixels
 
-		self:resetView()
+		Passing `cellSize` also resets the view to fit it; omit it to swap images in place.
+	]=]
+	function object:setImages(editableImages: { EditableImage }, cellSize: Vector2?)
+		if cellSize then
+			self.cellSize = cellSize
+		end
+
+		for index, editableImage in editableImages do
+			local label = self.textureImages[index]
+			if not label then
+				label = Create("ImageLabel", {
+					Name = `Texture{index}`,
+					BackgroundTransparency = 1,
+					Size = UDim2.fromScale(1, 1),
+					ResampleMode = Enum.ResamplerMode.Pixelated,
+					ZIndex = index,
+					Interactable = false,
+					Parent = self.textureStack,
+				}) :: ImageLabel
+				self.textureImages[index] = label
+			end
+
+			label.ImageContent = Content.fromObject(editableImage)
+			label.ImageRectOffset = Vector2.zero
+			label.ImageRectSize = self.cellSize
+		end
+
+		for index = #self.textureImages, #editableImages + 1, -1 do
+			self.textureImages[index]:Destroy()
+			self.textureImages[index] = nil
+		end
+
+		if cellSize then
+			self.textureSize = cellSize
+			self:resetView()
+		end
 	end
 
 	--[=[

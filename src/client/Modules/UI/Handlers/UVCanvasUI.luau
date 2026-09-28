@@ -802,7 +802,7 @@ local function UVCanvasUI(
 		endGesture()
 
 		self.selectedMeshPart = meshPart
-		self.view:setImage(getOutputImage(meshPart), getCellSize())
+		self.view:setImages({ getOutputImage(meshPart) }, getCellSize())
 
 		destroyWireframe()
 		if self.isWireframeVisible then

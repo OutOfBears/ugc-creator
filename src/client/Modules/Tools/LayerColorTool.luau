@@ -100,7 +100,14 @@ local function LayerColorTool(modelInfo: ModelInfo.ModelInfo): LayerColorTool
 	function object:composeFinalImage(): EditableImage?
 		local targetPart = self.modelInfo:getColorTargetPart()
 
-		return if targetPart then self.modelInfo:getTextureInfo():getOutputTextureByName(targetPart.Name) else nil
+		if not targetPart then
+			return nil
+		end
+
+		local textureInfo = self.modelInfo:getTextureInfo()
+		textureInfo:flushOutputColorMap(targetPart)
+
+		return textureInfo:getOutputTextureByName(targetPart.Name)
 	end
 
 	--[=[
