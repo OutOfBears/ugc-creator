@@ -1,3 +1,4 @@
+local EdgeBleed = require("../Utils/EdgeBleed")
 local ImageEditActions = require("../Actions/ImageEditActions")
 local TextureInfo = require("../TextureInfo")
 local TextureUtils = require("../Utils/TextureUtils")
@@ -200,6 +201,10 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 				rectPosition,
 				rectSize
 			)
+		end
+
+		if self.textureInfo.usesLayerDecals then
+			EdgeBleed.bleedRect(self.targetEditableImage, rectPosition, rectSize)
 		end
 
 		self.drawPositions[#self.drawPositions + 1] = newPosition

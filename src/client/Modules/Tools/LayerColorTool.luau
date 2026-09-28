@@ -59,8 +59,15 @@ local function LayerColorTool(modelInfo: ModelInfo.ModelInfo): LayerColorTool
 		`LayerColorTool could not find '{targetPart.Name}' in the blank's source model`
 	)
 
-	local paintImage = modelInfo:getTextureInfo():getOutputTextureByName(targetPart.Name)
-	object.preview = maid:add(LayerDecalPreview(targetPart, sourceMeshPart, catalog, paintImage))
+	local textureInfo = modelInfo:getTextureInfo()
+	local paintImage = textureInfo:getOutputTextureByName(targetPart.Name)
+	object.preview = maid:add(LayerDecalPreview(targetPart, sourceMeshPart, catalog))
+
+	local function refreshPaintPreview()
+		object.preview:setPaintImages(textureInfo:getPaintPreviewImages(targetPart))
+	end
+	refreshPaintPreview()
+	maid:add(textureInfo.paintPreviewChanged.Event:Connect(refreshPaintPreview))
 
 	local compositor: LayerColorCompositor.LayerColorCompositor? = nil
 
@@ -118,6 +125,8 @@ local function LayerColorTool(modelInfo: ModelInfo.ModelInfo): LayerColorTool
 			compositor = maid:add(LayerColorCompositor(self.catalog))
 		end
 		assert(compositor, "compositor")
+
+		textureInfo:flushOutputColorMap(targetPart)
 
 		return compositor:compose(self.modelInfo:getSectionColors(), self.modelInfo:getVariantSelections(), paintImage)
 	end

@@ -9,15 +9,20 @@
 --[=[
 	@within EdgeBleed
 	@param editableImage EditableImage -- the image to fix up
+	@param rectPosition Vector2 -- top-left of the area to fix up
+	@param rectSize Vector2 -- size of that area
 
-	Copies painted colors one pixel out into the fully transparent pixels around them.
+	Copies painted colors one pixel out into the fully transparent pixels around them, within the
+	given area only.
 ]=]
-local function bleed(editableImage: EditableImage)
-	local size = editableImage.Size
-	local width = size.X
-	local height = size.Y
+local function bleedRect(editableImage: EditableImage, rectPosition: Vector2, rectSize: Vector2)
+	local width = rectSize.X
+	local height = rectSize.Y
+	if width <= 0 or height <= 0 then
+		return
+	end
 
-	local pixels = editableImage:ReadPixelsBuffer(Vector2.zero, size)
+	local pixels = editableImage:ReadPixelsBuffer(rectPosition, rectSize)
 	local rowStride = width * 4
 	local changed = false
 
@@ -47,10 +52,21 @@ local function bleed(editableImage: EditableImage)
 	end
 
 	if changed then
-		editableImage:WritePixelsBuffer(Vector2.zero, size, pixels)
+		editableImage:WritePixelsBuffer(rectPosition, rectSize, pixels)
 	end
+end
+
+--[=[
+	@within EdgeBleed
+	@param editableImage EditableImage -- the image to fix up
+
+	Copies painted colors one pixel out into the fully transparent pixels around them.
+]=]
+local function bleed(editableImage: EditableImage)
+	bleedRect(editableImage, Vector2.zero, editableImage.Size)
 end
 
 return {
 	bleed = bleed,
+	bleedRect = bleedRect,
 }

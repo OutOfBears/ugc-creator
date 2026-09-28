@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
@@ -375,6 +376,19 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 
 		local penDown = false
 
+		-- A drag can fire several move events per frame; only the latest is drawn, once per frame.
+		local pendingInputPosition: Vector2? = nil
+		local pendingIsVirtualCursorMovement = false
+		local function applyPendingInput()
+			maid.pendingInput = nil
+
+			local inputPosition = pendingInputPosition
+			pendingInputPosition = nil
+			if inputPosition then
+				self:handleInputChanged(inputPosition, pendingIsVirtualCursorMovement)
+			end
+		end
+
 		maid:add(inputCapture.InputBegan:Connect(function(input, gameProcessedEvent)
 			if gameProcessedEvent then
 				return
@@ -476,7 +490,12 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 				end
 				self.lastVirtualCursorUpdate = ticks
 			end
-			self:handleInputChanged(inputPosition, isVirtualCursorMovement)
+
+			pendingInputPosition = inputPosition
+			pendingIsVirtualCursorMovement = isVirtualCursorMovement
+			if not maid.pendingInput then
+				maid.pendingInput = RunService.PreRender:Once(applyPendingInput)
+			end
 		end))
 
 		maid:add(UserInputService.InputEnded:Connect(function(input, _gameProcessedEvent)
@@ -504,6 +523,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 			end
 
 			if wasPenDown then
+				applyPendingInput()
 				self:endStroke()
 			end
 		end))
@@ -585,6 +605,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 		end
 
 		self.currentBrush:penUp()
+		self.modelInfo:getTextureInfo():scheduleEdgeBleed(self.currentBrush.targetEditableImage)
 		self.currentBrush:destroy()
 		self.currentBrush = nil
 	end

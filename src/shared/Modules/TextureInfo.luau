@@ -68,9 +68,12 @@ export type TextureInfo = {
 	lastCreatedEditableImage: EditableImage?,
 	lastCreatedEditableImageTextureId: string?,
 	memorySafeEditableImage: EditableImage?,
+	usesLayerDecals: boolean,
 	paintLayers: { PaintLayer },
 	stickerPaintLayers: { [string]: string },
 	blendScratchImages: { [string]: EditableImage },
+	mergedPreviewImages: { [LayerInfo]: EditableImage },
+	paintPreviewChanged: BindableEvent,
 	-- methods
 	getMemorySafeEditableImage: (self: TextureInfo, textureId: string?, size: Vector2?) -> EditableImage,
 	hasRegion: (self: TextureInfo, regionName: string) -> boolean,
@@ -87,6 +90,9 @@ export type TextureInfo = {
 	removeLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> (),
 	hasLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> boolean,
 	updateOutputColorMap: (self: TextureInfo, meshPart: MeshPart) -> (),
+	flushOutputColorMap: (self: TextureInfo, meshPart: MeshPart) -> (),
+	getPaintPreviewImages: (self: TextureInfo, meshPart: MeshPart) -> { EditableImage },
+	scheduleEdgeBleed: (self: TextureInfo, image: EditableImage) -> (),
 	getPaintLayers: (self: TextureInfo) -> { PaintLayer },
 	getPaintLayer: (self: TextureInfo, layerId: string) -> PaintLayer?,
 	getPaintLayerIndex: (self: TextureInfo, layerId: string) -> number?,
@@ -120,24 +126,22 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	object.individualPartsNames = blankData.individualPartsNames
 	object.enableKitbashing = blankData.enableKitbashing
 
-	-- A layer-catalog blank shows its paint as a decal over the layer decals and composes the final
+	-- A layer-catalog blank shows its paint as decals over the layer decals and composes the final
 	-- texture later, so its paint layers stay transparent and no SurfaceAppearance is bound.
 	local usesLayerDecals = blankData.layerCatalogName ~= nil
 
-	-- The layer decals show this paint scaled down, so its transparent edges need their color bled
-	-- out. That is a full-image pass, so it runs once edits pause rather than on every merge.
-	local pendingEdgeBleeds: { [LayerInfo]: thread } = {}
-	local function scheduleEdgeBleed(layerInfo: LayerInfo)
-		local pending = pendingEdgeBleeds[layerInfo]
+	local pendingEdgeBleeds: { [EditableImage]: thread } = {}
+	local function cancelEdgeBleed(image: EditableImage)
+		local pending = pendingEdgeBleeds[image]
 		if pending then
 			task.cancel(pending)
+			pendingEdgeBleeds[image] = nil
 		end
-
-		pendingEdgeBleeds[layerInfo] = task.delay(CreationConfig.paintEdgeBleedDelay, function()
-			pendingEdgeBleeds[layerInfo] = nil
-			EdgeBleed.bleed(layerInfo.outputEditableImage)
-		end)
 	end
+
+	local staleOutputs: { [LayerInfo]: boolean } = {}
+	local pendingFrameUpdates: { [LayerInfo]: boolean } = {}
+	local frameUpdateConnection: RBXScriptConnection? = nil
 
 	local function getBlendScratchImage(size: Vector2, fillColor: Color3, fillTransparency: number): EditableImage?
 		local key = `{size.X}x{size.Y}`
@@ -213,8 +217,8 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		return string.sub(layerName, 1, #prefix) == prefix
 	end
 
-	local function doMergeDownLayers(layerInfo: LayerInfo)
-		local outputImage = layerInfo.outputEditableImage
+	local function doMergeDownLayers(layerInfo: LayerInfo, targetImage: EditableImage?, lastPaintLayerIndex: number?)
+		local outputImage = targetImage or layerInfo.outputEditableImage
 
 		for i, layer: SingleLayer in layerInfo.inputLayers do
 			if i == 1 then
@@ -224,7 +228,11 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			end
 		end
 
-		for _, paintLayer in object.paintLayers do
+		for i, paintLayer in object.paintLayers do
+			if lastPaintLayerIndex and i > lastPaintLayerIndex then
+				break
+			end
+
 			if not paintLayer.visible then
 				continue
 			end
@@ -233,6 +241,72 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			if #group > 0 then
 				blendPaintLayerGroup(outputImage, group, paintLayer.blendMode)
 			end
+		end
+	end
+
+	-- Decals can only alpha-blend, so everything up to the topmost blended layer is shown as one
+	-- merged image, and only the Normal layers above it are shown directly.
+	local function getTopBlendedPaintLayerIndex(): number
+		for i = #object.paintLayers, 1, -1 do
+			local paintLayer = object.paintLayers[i]
+			if paintLayer.visible and paintLayer.blendMode ~= CreationConfig.paintBlendModes.normal then
+				return i
+			end
+		end
+
+		return 0
+	end
+
+	local function getMergedPreviewImage(layerInfo: LayerInfo): EditableImage?
+		local image = object.mergedPreviewImages[layerInfo]
+		if not image then
+			image = AssetService:CreateEditableImage({ Size = layerInfo.outputEditableImage.Size })
+			if not image then
+				return nil
+			end
+			object.mergedPreviewImages[layerInfo] = image
+		end
+
+		return image
+	end
+
+	local function refreshPaintPreview(layerInfo: LayerInfo)
+		local topBlendedIndex = getTopBlendedPaintLayerIndex()
+		if topBlendedIndex == 0 then
+			return
+		end
+
+		local mergedImage = getMergedPreviewImage(layerInfo)
+		if mergedImage then
+			doMergeDownLayers(layerInfo, mergedImage, topBlendedIndex)
+			object:scheduleEdgeBleed(mergedImage)
+		else
+			doMergeDownLayers(layerInfo)
+			staleOutputs[layerInfo] = nil
+			object:scheduleEdgeBleed(layerInfo.outputEditableImage)
+		end
+	end
+
+	local function runFrameUpdates()
+		frameUpdateConnection = nil
+
+		local layerInfos = table.clone(pendingFrameUpdates)
+		table.clear(pendingFrameUpdates)
+
+		for layerInfo in layerInfos do
+			if usesLayerDecals then
+				refreshPaintPreview(layerInfo)
+			else
+				doMergeDownLayers(layerInfo)
+			end
+		end
+	end
+
+	local function scheduleFrameUpdate(layerInfo: LayerInfo)
+		pendingFrameUpdates[layerInfo] = true
+
+		if not frameUpdateConnection then
+			frameUpdateConnection = RunService.PreRender:Once(runFrameUpdates)
 		end
 	end
 
@@ -252,6 +326,11 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			scratch:Destroy()
 		end
 		table.clear(object.blendScratchImages)
+
+		for _, mergedImage in object.mergedPreviewImages do
+			mergedImage:Destroy()
+		end
+		table.clear(object.mergedPreviewImages)
 
 		maid:doCleaning()
 	end
@@ -820,6 +899,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		else
 			newLayer = self.reservedStickerEditableImageMap[layerName]
 			if newLayer.Size ~= layerInfo.outputEditableImage.Size then
+				cancelEdgeBleed(newLayer)
 				newLayer:Destroy()
 				newLayer = AssetService:CreateEditableImage({ Size = layerInfo.outputEditableImage.Size })
 				assert(newLayer, "Budget should be sufficient to create sticker layer")
@@ -832,6 +912,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			name = layerName,
 			editableImage = newLayer,
 		})
+		self.paintPreviewChanged:Fire()
 
 		return newLayer, true
 	end
@@ -847,6 +928,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		for i, layer in layerInfo.inputLayers do
 			if layer.name == layerName then
 				table.remove(layerInfo.inputLayers, i)
+				self.paintPreviewChanged:Fire()
 				break
 			end
 		end
@@ -879,14 +961,110 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		@param meshPart MeshPart -- the part whose color map to rebuild
 
 		Merges the part's input layers back down into the output image the SurfaceAppearance reads.
+		The server merges immediately. The client merges at most once per frame, and on a
+		layer-catalog blank only refreshes the paint preview, leaving the output stale until
+		[TextureInfo:flushOutputColorMap].
 	]=]
 	function object:updateOutputColorMap(meshPart: MeshPart)
 		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
+
+		if not RunService:IsClient() then
+			doMergeDownLayers(layerInfo)
+			return
+		end
+
+		if usesLayerDecals then
+			staleOutputs[layerInfo] = true
+		end
+		scheduleFrameUpdate(layerInfo)
+	end
+
+	--[=[
+		@within TextureInfo
+		@param meshPart MeshPart -- the part whose output image is about to be read
+
+		Brings the part's output image up to date right away. Call it before reading the output.
+	]=]
+	function object:flushOutputColorMap(meshPart: MeshPart)
+		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
+		if not staleOutputs[layerInfo] and not (pendingFrameUpdates[layerInfo] and not usesLayerDecals) then
+			return
+		end
+
+		staleOutputs[layerInfo] = nil
+		if not usesLayerDecals then
+			pendingFrameUpdates[layerInfo] = nil
+		end
+
 		doMergeDownLayers(layerInfo)
 
-		if usesLayerDecals and RunService:IsClient() then
-			scheduleEdgeBleed(layerInfo)
+		if usesLayerDecals then
+			cancelEdgeBleed(layerInfo.outputEditableImage)
+			EdgeBleed.bleed(layerInfo.outputEditableImage)
 		end
+	end
+
+	--[=[
+		@within TextureInfo
+		@param meshPart MeshPart -- the part whose layer stack to show
+		@return { EditableImage } -- images to stack bottom to top, e.g. one decal each
+
+		The live preview of a layer-catalog blank's paint. Normal layers above the topmost blended
+		layer are their own images, so painting them needs no merge; everything up to that blended
+		layer is one merged image, refreshed once per frame.
+	]=]
+	function object:getPaintPreviewImages(meshPart: MeshPart): { EditableImage }
+		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
+		local images = {}
+		if not layerInfo then
+			return images
+		end
+
+		local topBlendedIndex = getTopBlendedPaintLayerIndex()
+		if topBlendedIndex > 0 then
+			local mergedImage = getMergedPreviewImage(layerInfo)
+			if not mergedImage then
+				return { layerInfo.outputEditableImage }
+			end
+			table.insert(images, mergedImage)
+		else
+			for _, layer in layerInfo.inputLayers do
+				if not isStickerLayerName(layer.name) then
+					table.insert(images, layer.editableImage)
+				end
+			end
+		end
+
+		for i, paintLayer in self.paintLayers do
+			if i <= topBlendedIndex or not paintLayer.visible then
+				continue
+			end
+
+			for _, image in getPaintLayerGroup(layerInfo, paintLayer) do
+				table.insert(images, image)
+			end
+		end
+
+		return images
+	end
+
+	--[=[
+		@within TextureInfo
+		@param image EditableImage -- a paint preview image that was just edited
+
+		Bleeds paint color into the image's transparent edges once edits pause, so a scaled-down
+		decal shows no dark outline. Only layer-catalog blanks on the client need it.
+	]=]
+	function object:scheduleEdgeBleed(image: EditableImage)
+		if not usesLayerDecals or not RunService:IsClient() then
+			return
+		end
+
+		cancelEdgeBleed(image)
+		pendingEdgeBleeds[image] = task.delay(CreationConfig.paintEdgeBleedDelay, function()
+			pendingEdgeBleeds[image] = nil
+			EdgeBleed.bleed(image)
+		end)
 	end
 
 	--[=[
@@ -967,6 +1145,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			blendMode = CreationConfig.paintBlendModes.normal,
 			visible = true,
 		})
+		self.paintPreviewChanged:Fire()
 
 		return true
 	end
@@ -987,10 +1166,12 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		for _, layerInfo in self:getUniqueLayerMap() do
 			local image = layerInfo.paintImages[layerId]
 			if image then
+				cancelEdgeBleed(image)
 				image:Destroy()
 				layerInfo.paintImages[layerId] = nil
 			end
 		end
+		self.paintPreviewChanged:Fire()
 	end
 
 	--[=[
@@ -1006,6 +1187,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 		local paintLayer = table.remove(self.paintLayers, index)
 		table.insert(self.paintLayers, math.clamp(toIndex, 1, #self.paintLayers + 1), paintLayer)
+		self.paintPreviewChanged:Fire()
 	end
 
 	--[=[
@@ -1017,6 +1199,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		local paintLayer = self:getPaintLayer(layerId)
 		if paintLayer then
 			paintLayer.blendMode = blendMode
+			self.paintPreviewChanged:Fire()
 		end
 	end
 
@@ -1029,6 +1212,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		local paintLayer = self:getPaintLayer(layerId)
 		if paintLayer then
 			paintLayer.visible = visible
+			self.paintPreviewChanged:Fire()
 		end
 	end
 
@@ -1038,7 +1222,10 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		@param layerId string? -- the paint layer that owns it, or nil to clear
 	]=]
 	function object:setStickerPaintLayer(stickerLayerName: string, layerId: string?)
-		self.stickerPaintLayers[stickerLayerName] = layerId
+		if self.stickerPaintLayers[stickerLayerName] ~= layerId then
+			self.stickerPaintLayers[stickerLayerName] = layerId
+			self.paintPreviewChanged:Fire()
+		end
 	end
 
 	--[=[
@@ -1131,6 +1318,12 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		end
 		table.clear(pendingEdgeBleeds)
 
+		if frameUpdateConnection then
+			frameUpdateConnection:Disconnect()
+			frameUpdateConnection = nil
+		end
+		table.clear(pendingFrameUpdates)
+
 		for _, layerInfo in pairs(self.modelTextureInfo) do
 			for _, layer in layerInfo.inputLayers do
 				layer.editableImage:Destroy()
@@ -1163,8 +1356,11 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			visible = true,
 		},
 	}
+	object.usesLayerDecals = usesLayerDecals
 	object.stickerPaintLayers = {}
 	object.blendScratchImages = {}
+	object.mergedPreviewImages = {}
+	object.paintPreviewChanged = maid:add(Instance.new("BindableEvent"))
 
 	object.regionMap = setupRegionMap()
 	object.perMeshPartRegionMap = setupMeshPartToRegionMap(blankData.regionMapIndividual or {})

@@ -207,6 +207,15 @@ local function UVCanvasUI(
 		return getTextureInfo().modelTextureInfo[meshPart].outputEditableImage
 	end
 
+	local function getCanvasImages(meshPart: MeshPart): { EditableImage }
+		local textureInfo = getTextureInfo()
+		if textureInfo.usesLayerDecals then
+			return textureInfo:getPaintPreviewImages(meshPart)
+		end
+
+		return { getOutputImage(meshPart) }
+	end
+
 	local function getCellSize(): Vector2
 		local meshPart = assert(object.selectedMeshPart, "UVCanvasUI has no layer stack")
 
@@ -800,6 +809,11 @@ local function UVCanvasUI(
 			end
 
 			connectInput(openMaid)
+			openMaid:add(getTextureInfo().paintPreviewChanged.Event:Connect(function()
+				if self.selectedMeshPart then
+					self.view:setImages(getCanvasImages(self.selectedMeshPart))
+				end
+			end))
 			self.container.Visible = true
 		end
 
@@ -860,7 +874,7 @@ local function UVCanvasUI(
 		endGesture()
 
 		self.selectedMeshPart = meshPart
-		self.view:setImage(getOutputImage(meshPart), getCellSize())
+		self.view:setImages(getCanvasImages(meshPart), getCellSize())
 
 		destroyWireframe()
 		if self.isWireframeVisible then

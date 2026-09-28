@@ -830,6 +830,10 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 			local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 			textureInfo:updateOutputColorMap(stickerData.targetMeshPart)
 		end
+
+		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
+		local stickerLayerName = CreationConfig.layerNames.stickerPrefix .. stickerData.stickerLayerNumber
+		textureInfo:scheduleEdgeBleed(textureInfo.reservedStickerEditableImageMap[stickerLayerName])
 	end
 
 	--[=[
