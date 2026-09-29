@@ -21,6 +21,13 @@ export type DebugTool = {
 	canRun: (() -> boolean)?,
 }
 
+export type EditHandleState = {
+	visible: boolean,
+	offset: Vector2,
+	scale: number,
+	rotation: number,
+}
+
 export type GroupRoles = {
 	IsMember: string,
 	Roles: { [number]: { Id: string, Name: string, Rank: number } },

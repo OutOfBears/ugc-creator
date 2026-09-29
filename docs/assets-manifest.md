@@ -70,7 +70,7 @@ These are positional anchors; the code reads their `CFrame`, so they have to sta
 | Instance | Why |
 |---|---|
 | `ReplicatedStorage.Remotes` (all 8 remotes) | Replaced by the `Network` module, which creates its own remotes under `ReplicatedStorage.Network` at runtime. |
-| `StarterGui.ScreenGui.LoadingScreen` | Now built in code — see [LoadingScreen.luau](../src/client/Modules/UI/LoadingScreen.luau). It was never mapped by any project file, so the old client hung on `WaitForChild` if it was missing. |
+| `StarterGui.ScreenGui.LoadingScreen` | Now built in code — see [LoadingScreen.luau](../src/interfaces/Views/LoadingScreen.luau). It was never mapped by any project file, so the old client hung on `WaitForChild` if it was missing. |
 | `ReplicatedStorage.Modules` | The code moved into the repo tree. |
 | `ServerStorage.Modules` | Same. |
 

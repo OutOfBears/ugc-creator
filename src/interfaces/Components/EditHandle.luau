@@ -16,9 +16,13 @@ export type HandleState = {
 	rotation: number,
 }
 
+export type HandleKind = "move" | "rotate" | "scale"
+
 export type EditHandleProps = {
 	handle: React.Binding<HandleState>,
+	onInputBegan: ((kind: HandleKind, input: InputObject) -> ())?,
 	moveInteractable: boolean?,
+	zIndex: number?,
 	rotateRef: { current: GuiObject? }?,
 	scaleRef: { current: GuiObject? }?,
 }
@@ -28,8 +32,8 @@ export type EditHandleProps = {
 	@client
 
 	The ring used to move, rotate and resize stickers and add-ons, with rotate and scale knobs on its
-	edge. It only draws itself from the `handle` binding; the owner reads its knobs through the refs
-	to drive the drag.
+	edge. It only draws itself from the `handle` binding; the owner drives the drag, either from
+	`onInputBegan` or by reading the knobs through the refs.
 ]=]
 local EditHandle = memo(function(props: EditHandleProps)
 	local theme = useTheme()
@@ -46,7 +50,18 @@ local EditHandle = memo(function(props: EditHandleProps)
 		end)
 	end
 
-	local function knob(icon: string, degrees: number, ref: { current: GuiObject? }?)
+	local function inputBegan(kind: HandleKind)
+		local onInputBegan = props.onInputBegan
+		if not onInputBegan then
+			return nil
+		end
+
+		return function(_: GuiObject, input: InputObject)
+			onInputBegan(kind, input)
+		end
+	end
+
+	local function knob(kind: HandleKind, icon: string, degrees: number, ref: { current: GuiObject? }?)
 		return createElement(IconButton, {
 			icon = icon,
 			iconSize = tokens.SmallHandleIconSize,
@@ -56,6 +71,7 @@ local EditHandle = memo(function(props: EditHandleProps)
 				Position = knobPosition(degrees),
 				Size = tokens.SmallHandleSize,
 				ref = ref,
+				[React.Event.InputBegan] = inputBegan(kind),
 			},
 		}, {
 			corner = createElement("UICorner", {
@@ -83,6 +99,8 @@ local EditHandle = memo(function(props: EditHandleProps)
 		Visible = handle:map(function(state: HandleState)
 			return state.visible
 		end),
+		ZIndex = props.zIndex,
+		[React.Event.InputBegan] = inputBegan("move"),
 	}, {
 		stroke = createElement("UIStroke", {
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
@@ -93,8 +111,8 @@ local EditHandle = memo(function(props: EditHandleProps)
 		corner = createElement("UICorner", {
 			CornerRadius = tokens.Radius.Circle,
 		}),
-		rotateHandle = knob(CreationIcons.icons.Rotate, tokens.RotateHandlePosDegrees, props.rotateRef),
-		scaleHandle = knob(CreationIcons.icons.Scale, tokens.ScaleHandlePosDegrees, props.scaleRef),
+		rotateHandle = knob("rotate", CreationIcons.icons.Rotate, tokens.RotateHandlePosDegrees, props.rotateRef),
+		scaleHandle = knob("scale", CreationIcons.icons.Scale, tokens.ScaleHandlePosDegrees, props.scaleRef),
 	})
 end)
 

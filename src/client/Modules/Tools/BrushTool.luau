@@ -1,4 +1,3 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -6,7 +5,7 @@ local UserInputService = game:GetService("UserInputService")
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
 local BrushTips = require(ReplicatedStorage.Shared.Data.BrushTips)
 local Brushes = require(ReplicatedStorage.Shared.Modules.Brushes)
-local Create = require(ReplicatedStorage.Shared.Modules.Create)
+local Charm = require(ReplicatedStorage.Packages.Charm)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationInput = require("../CreationInput")
 local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
@@ -18,9 +17,6 @@ local ModelInfo = require(ReplicatedStorage.Shared.Modules.ModelInfo)
 local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
 local TextureInfo = require(ReplicatedStorage.Shared.Modules.TextureInfo)
 local ToolInput = require("../ToolInput")
-
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer.PlayerGui
 
 export type BrushTool = {
 	-- vars
@@ -40,8 +36,7 @@ export type BrushTool = {
 	lastVirtualCursorUpdate: number,
 	lastDrawnMeshPart: MeshPart?,
 	activePaintLayerId: string,
-	brushInputGui: ScreenGui,
-	inputCapture: Frame,
+	captureEnabled: Charm.Atom<boolean>,
 	maid: Maid.Maid,
 	-- methods
 	setStatePainting: (self: BrushTool) -> (),
@@ -64,6 +59,7 @@ export type BrushTool = {
 	endStroke: (self: BrushTool) -> (),
 	castRayFromCamera: (self: BrushTool, inputPosition: Vector2) -> (boolean, MeshUtils.EditableMeshRaycastResult?),
 	setupMeshDraw: (self: BrushTool) -> (),
+	onCaptureInputBegan: (self: BrushTool, input: InputObject, gameProcessedEvent: boolean) -> (),
 	handleInputChanged: (self: BrushTool, inputPosition: Vector2, isVirtualCursorMovement: boolean) -> (),
 	destroy: (self: BrushTool) -> (),
 }
@@ -208,14 +204,14 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 		player has actually picked the brush.
 	]=]
 	function object:enable()
-		self.brushInputGui.Enabled = true
+		self.captureEnabled(true)
 	end
 
 	--[=[
 		@within BrushTool
 	]=]
 	function object:disable()
-		self.brushInputGui.Enabled = false
+		self.captureEnabled(false)
 	end
 
 	--[=[
@@ -360,23 +356,11 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 	--[=[
 		@within BrushTool
 
-		Builds the full-screen input capture and wires the pen down/move/up handlers. Input only
-		reaches the tool while its gui is enabled.
+		Wires the pen down/move/up handlers. Presses only arrive while `captureEnabled` is set,
+		which is when the UI shows the full-screen brush capture.
 	]=]
 	function object:setupMeshDraw()
-		local inputCapture = Create("Frame", {
-			BackgroundTransparency = 1,
-			Size = UDim2.fromScale(1, 1),
-		}) :: Frame
-
-		local brushInputGui = Create("ScreenGui", {
-			Name = "BrushInputGui",
-			Children = { inputCapture },
-			Parent = PlayerGui,
-		}) :: ScreenGui
-
-		self.brushInputGui = maid:add(brushInputGui)
-		self.inputCapture = inputCapture
+		self.captureEnabled = Charm.atom(true)
 
 		local penDown = false
 
@@ -393,7 +377,15 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 			end
 		end
 
-		maid:add(inputCapture.InputBegan:Connect(function(input, gameProcessedEvent)
+		--[=[
+			@within BrushTool
+			@param input InputObject -- a press on the full-screen brush capture
+			@param gameProcessedEvent boolean -- whether the engine already consumed it
+
+			Starts a stroke where the press hits the model. The UI renders the capture while
+			`captureEnabled` is set and forwards its presses here.
+		]=]
+		function object.onCaptureInputBegan(_: BrushTool, input: InputObject, gameProcessedEvent: boolean)
 			if gameProcessedEvent then
 				return
 			end
@@ -448,7 +440,7 @@ local function BrushTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationI
 				isVirtualCursorMovement = false,
 			}
 			self:beginStroke(raycastResult.meshPart, drawInfo)
-		end))
+		end
 
 		maid:add(UserInputService.InputChanged:Connect(function(input, gameProcessedEvent)
 			if not penDown then

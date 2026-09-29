@@ -298,7 +298,7 @@ behavior's `state` table, not via `instance:SetAttribute(...)`.** Reach for raw
   - `Modules/` (utilities), `Behaviors/` + `Data/` (shared bases and data tables)
 - `src/interfaces/` → `ReplicatedStorage.Interfaces` — React UI (`Views/`, `Components/`,
   `Contexts/`, `Hooks/`, `Stories/`); `UIController` mounts each `Views/` module. Scaffold with the
-  `/ui` skill. The vanilla UI in `src/client/Modules/UI/` is being ported here — don't extend it.
+  `/ui` skill. See `docs/ui-architecture.md`.
 - `src/Server.server.luau`, `src/Client.client.luau` — top-level runtime entrypoints
 - `Packages/` → `ReplicatedStorage.Packages` (shared, Wally); `ServerPackages/` →
   `ServerScriptService.Packages` (server-only, Wally)

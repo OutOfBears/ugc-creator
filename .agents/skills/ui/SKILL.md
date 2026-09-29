@@ -32,15 +32,12 @@ Reuse first (AGENTS.md §5): consume state through the existing hooks in
 
 - **Styling is inline props from `useTheme()`** — `theme.tokens` (`Shared/Data/StyleTokens`
   `.style`), `theme.fonts`, and `theme.layout` (`Shared/Data/StyleLayouts`, mobile or desktop).
-  Never tag React elements for the legacy `StyleSheet` system in `src/client/Modules/UI/Style/`;
-  it is being retired. When porting a vanilla component, pull every `StyleRules` selector that
-  names its tags and translate it: `.Tag` → props, `.Tag::UIPadding` / `::UIListLayout` /
-  `::UICorner` / `::UIFlexItem` / `::UISizeConstraint` → explicit child elements (never drop
-  these — they carry the layout), `${Token}` → `theme.layout.Token`, runtime
-  `addStyleTag`/`removeStyleTag` → a prop.
-- **Session-scoped Views** read `useAtom(ClientAtoms.creationSession)` and `ClientAtoms.isMobile`,
-  return `nil` without a session, and otherwise render `Components/CreationScope` keyed by
-  `session.id`. Below it, `useCreationSession()` reaches the tools and `useTheme()` the tokens.
+  There are no tags or StyleSheets: padding, list layouts, corners, strokes and flex items are
+  explicit child elements, and any value you would name comes from a token.
+- **Session-scoped Views** wrap their content in `Views/Creation/SessionGate`, which renders
+  nothing without an open session and otherwise provides `CreationScope` keyed by the session.
+  Below it, `useCreationSession()` reaches the tools and `useTheme()` the tokens. A View sets its
+  own ScreenGui's display order, insets and `Enabled` with `useScreenGui(props.playerGui, {...})`.
 - **Tool state** comes from a tool's `state` atom (e.g. `LayersTool.state`, an immutable
   snapshot republished after each change) via `useAtom`. Call tool methods from event handlers;
   never call tool methods from effect cleanups — the session tears its tools down itself.

@@ -6,9 +6,9 @@ local UserInputService = game:GetService("UserInputService")
 
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
 local CameraManager = require("./CameraManager")
+local Charm = require(ReplicatedStorage.Packages.Charm)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
-local CreationIcons = require(ReplicatedStorage.Shared.Data.CreationIcons)
 local CreationInput = require("./CreationInput")
 local GeometryUtil = require(ReplicatedStorage.Shared.Modules.Utils.GeometryUtil)
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
@@ -19,16 +19,34 @@ local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
 local ToolInput = require("./ToolInput")
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+export type LineDisplay = {
+	visible: boolean,
+	position: UDim2,
+	rotation: number,
+	size: UDim2,
+}
+
+export type WidgetDisplay = {
+	visible: boolean,
+	position: UDim2,
+	dragging: boolean,
+	lines: { LineDisplay },
+}
+
+export type WidgetEntry = {
+	name: string,
+	lineCount: number,
+}
 
 type WidgetController = {
 	widgetData: MeshInfo.WidgetData,
 
-	widgetUI: ImageButton,
+	display: WidgetDisplay,
 
 	isActive: boolean,
 	controlUIMap: {
-		[MeshInfo.WidgetControl]: { GuiObject },
+		[MeshInfo.WidgetControl]: { LineDisplay },
 	},
 }
 
@@ -40,17 +58,19 @@ export type MeshEditingWidgets = {
 	creationInput: CreationInput.CreationInput,
 	cameraManager: CameraManager.CameraManager,
 	surfaceGuiPart: Part,
-	surfaceGui: SurfaceGui,
+	canvasSize: Charm.Atom<Vector2>,
+	widgetEntries: Charm.Atom<{ WidgetEntry }>,
+	widgetDisplays: Charm.Atom<{ [string]: WidgetDisplay }>,
 	widgets: { [string]: WidgetController },
 	draggingWidget: WidgetController?,
 	lastWidgetAction: Actions.Action?,
-	widgetUnderMouse: ImageButton?,
 	prevMousePos: (Vector2 | Vector3)?,
 	-- methods
 	bindRenderStepped: (self: MeshEditingWidgets) -> (),
 	setupWidgets: (self: MeshEditingWidgets, controlGroupName: string) -> (),
 	isWidgetVisibleInView: (self: MeshEditingWidgets, widgetController: WidgetController, viewName: string) -> boolean,
-	drawLineBetweenPoints: (self: MeshEditingWidgets, frame: GuiObject, p1: Vector3, p2: Vector3) -> (),
+	drawLineBetweenPoints: (self: MeshEditingWidgets, line: LineDisplay, p1: Vector3, p2: Vector3) -> (),
+	beginWidgetDrag: (self: MeshEditingWidgets, widgetName: string) -> (),
 	onWidgetMoved: (self: MeshEditingWidgets, widgetData: MeshInfo.WidgetData, newPosition: Vector3) -> (),
 	getWidgetDataForPart: (self: MeshEditingWidgets, partName: string) -> WidgetController?,
 	getActiveControlForWidget: (
@@ -63,70 +83,28 @@ export type MeshEditingWidgets = {
 	destroy: (self: MeshEditingWidgets) -> (),
 }
 
-local function createWidgetUI(maid: Maid.Maid, widgetData: MeshInfo.WidgetData, surfaceGui: SurfaceGui)
-	local circle = Create("ImageLabel", {
-		Size = UDim2.fromOffset(20, 20),
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Image = CreationIcons.uiImages.WidgetHandle,
-		BackgroundTransparency = 1,
-		ImageTransparency = 0.1,
-		Name = "Circle",
-		Position = UDim2.fromScale(0.5, 0.5),
-	})
-
-	local widget = Create("ImageButton", {
-		Size = UDim2.fromOffset(30, 30),
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Image = CreationIcons.uiImages.WidgetHandle,
-		BackgroundTransparency = 1,
-		ImageColor3 = CreationConfig.widgets.color,
-		ImageTransparency = 0.5,
-		Name = widgetData.name,
-		Children = { circle },
-		Parent = surfaceGui,
-	}) :: ImageButton
-
-	maid:giveTask(widget)
-
+local function createWidgetDisplay(
+	widgetData: MeshInfo.WidgetData
+): (WidgetDisplay, { [MeshInfo.WidgetControl]: { LineDisplay } })
+	local lines = {}
 	local controlUIMap = {}
+
+	local function addLine(): LineDisplay
+		local line = { visible = false, position = UDim2.new(), rotation = 0, size = UDim2.new() }
+		table.insert(lines, line)
+
+		return line
+	end
 
 	for _, control: MeshInfo.WidgetControl in widgetData.controls do
 		if control.controlType == CreationConfig.controlTypes.line then
-			local lineFrame = Create("Frame", {
-				BorderSizePixel = 0,
-				BackgroundColor3 = Color3.new(1, 1, 1),
-				BackgroundTransparency = 0.8,
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				Name = "LineControl" .. control.view,
-				ZIndex = 0,
-				Parent = surfaceGui,
-			})
-
-			maid:giveTask(lineFrame)
-
-			controlUIMap[control] = { lineFrame }
+			controlUIMap[control] = { addLine() }
 		elseif control.controlType == CreationConfig.controlTypes.plane then
-			local controlUI = {}
-			for _i = 1, 4 do
-				local lineFrame = Create("Frame", {
-					BorderSizePixel = 0,
-					BackgroundColor3 = Color3.new(1, 1, 1),
-					BackgroundTransparency = 0.8,
-					AnchorPoint = Vector2.new(0.5, 0.5),
-					Name = "PlaneControl" .. control.view,
-					ZIndex = 0,
-					Parent = surfaceGui,
-				})
-
-				maid:giveTask(lineFrame)
-				controlUI[#controlUI + 1] = lineFrame
-			end
-
-			controlUIMap[control] = controlUI
+			controlUIMap[control] = { addLine(), addLine(), addLine(), addLine() }
 		end
 	end
 
-	return widget, controlUIMap
+	return { visible = false, position = UDim2.new(), dragging = false, lines = lines }, controlUIMap
 end
 
 local function snapWorldPointToControl(point: Vector3, control: MeshInfo.WidgetControl): Vector3
@@ -170,8 +148,10 @@ end
 	@class MeshEditingWidgets
 	@client
 
-	Draws the draggable mesh-editing handles and their control bounds on a camera-facing
-	SurfaceGui, and turns a drag into widget-position actions for the server.
+	Positions the draggable mesh-editing handles and their control bounds each frame, and turns a
+	drag into widget-position actions for the server. It keeps a camera-facing part for the UI's
+	SurfaceGui to adorn and publishes the handles as `widgetEntries` (which exist) and
+	`widgetDisplays` (where they are this frame); the UI forwards presses to `beginWidgetDrag`.
 ]=]
 local function MeshEditingWidgets(
 	modelInfo: ModelInfo.ModelInfo,
@@ -197,27 +177,16 @@ local function MeshEditingWidgets(
 		Parent = workspace,
 	}) :: Part
 
-	-- Adornee is set after construction: Create parents Instance-valued properties into the new
-	-- object, so passing it inline would reparent the part under the SurfaceGui.
-	local surfaceGui = Create("SurfaceGui", {
-		Name = "MeshEditingControls",
-		ResetOnSpawn = false,
-		CanvasSize = camera.ViewportSize,
-		AlwaysOnTop = true,
-		Parent = PlayerGui,
-	}) :: SurfaceGui
-	surfaceGui.Adornee = surfaceGuiPart
-
 	maid:giveTask(surfaceGuiPart)
-	maid:giveTask(surfaceGui)
 
 	object.surfaceGuiPart = surfaceGuiPart
-	object.surfaceGui = surfaceGui
+	object.canvasSize = Charm.atom(camera.ViewportSize)
+	object.widgetEntries = Charm.atom({} :: { WidgetEntry })
+	object.widgetDisplays = Charm.atom({} :: { [string]: WidgetDisplay })
 
 	object.widgets = {}
 	object.draggingWidget = nil
 	object.lastWidgetAction = nil
-	object.widgetUnderMouse = nil
 
 	maid.surfaceGui = RunService.RenderStepped:Connect(function()
 		local model = modelDisplay:getModel()
@@ -233,7 +202,7 @@ local function MeshEditingWidgets(
 		local width = height * aspect
 
 		surfaceGuiPart.Size = Vector3.new(width, height, 0.1)
-		surfaceGui.CanvasSize = camera.ViewportSize
+		object.canvasSize(camera.ViewportSize)
 
 		local newCFrame = cameraCFrame * CFrame.new(0, 0, -distance)
 		surfaceGuiPart.CFrame = CFrame.lookAt(newCFrame.Position, cameraCFrame.Position + cameraCFrame.LookVector)
@@ -254,37 +223,28 @@ local function MeshEditingWidgets(
 			for _, widgetController: WidgetController in self.widgets do
 				if self.draggingWidget == nil then
 					if self:isWidgetVisibleInView(widgetController, modelDisplay:getCurrentView()) then
-						widgetController.widgetUI.Visible = true
 						local initialCFrame = widgetController.widgetData.meshPart.CFrame
 						local widgetPos = initialCFrame:PointToWorldSpace(widgetController.widgetData.position)
 						local vector, _onScreen = workspace.CurrentCamera:WorldToScreenPoint(widgetPos)
 						local guiInset = GuiService:GetGuiInset()
-						widgetController.widgetUI.Position = UDim2.fromOffset(vector.X, vector.Y + guiInset.Y)
-						widgetController.widgetUI.Visible = widgetController.isActive
-
-						local widgetCircle = widgetController.widgetUI:FindFirstChild("Circle") :: ImageLabel
-						widgetCircle.ImageColor3 = Color3.new(1, 1, 1)
-						widgetController.widgetUI.ImageTransparency = 0.5
+						widgetController.display.position = UDim2.fromOffset(vector.X, vector.Y + guiInset.Y)
+						widgetController.display.visible = widgetController.isActive
+						widgetController.display.dragging = false
 					else
-						widgetController.widgetUI.Visible = false
+						widgetController.display.visible = false
 					end
 				else
 					if widgetController == self.draggingWidget then
-						widgetController.widgetUI.Visible = true
 						local initialCFrame = widgetController.widgetData.meshPart.CFrame
 						local widgetPos = initialCFrame:PointToWorldSpace(widgetController.widgetData.position)
 						local vector, _onScreen = workspace.CurrentCamera:WorldToScreenPoint(widgetPos)
 						local guiInset = GuiService:GetGuiInset()
-						widgetController.widgetUI.Position = UDim2.fromOffset(vector.X, vector.Y + guiInset.Y)
-
-						local widgetCircle = widgetController.widgetUI:FindFirstChild("Circle") :: ImageLabel
-						widgetCircle.ImageColor3 = CreationConfig.widgets.draggingColor
-						widgetController.widgetUI.ImageTransparency = 1
+						widgetController.display.position = UDim2.fromOffset(vector.X, vector.Y + guiInset.Y)
+						widgetController.display.visible = true
+						widgetController.display.dragging = true
 					else
-						local widgetCircle = widgetController.widgetUI:FindFirstChild("Circle") :: ImageLabel
-						widgetCircle.ImageColor3 = Color3.new(1, 1, 1)
-						widgetController.widgetUI.ImageTransparency = 0.5
-						widgetController.widgetUI.Visible = false
+						widgetController.display.visible = false
+						widgetController.display.dragging = false
 					end
 				end
 
@@ -293,16 +253,16 @@ local function MeshEditingWidgets(
 
 					if widgetController ~= self.draggingWidget or control.view ~= modelDisplay:getCurrentView() then
 						if controlUI then
-							for _, uiElement in controlUI do
-								uiElement.Visible = false
+							for _, line in controlUI do
+								line.visible = false
 							end
 						end
 
 						continue
 					end
 
-					for _, uiElement in controlUI do
-						uiElement.Visible = true
+					for _, line in controlUI do
+						line.visible = true
 					end
 					if control.controlType == CreationConfig.controlTypes.line then
 						local p1 = control.controlP1
@@ -351,6 +311,23 @@ local function MeshEditingWidgets(
 					end
 				end
 			end
+
+			local displays = {}
+			for widgetName, widgetController: WidgetController in self.widgets do
+				local display = widgetController.display
+				local lines = {}
+				for index, line in display.lines do
+					lines[index] = table.clone(line)
+				end
+
+				displays[widgetName] = {
+					visible = display.visible,
+					position = display.position,
+					dragging = display.dragging,
+					lines = lines,
+				}
+			end
+			self.widgetDisplays(displays)
 		end)
 	end
 
@@ -384,36 +361,22 @@ local function MeshEditingWidgets(
 				continue
 			end
 
-			local widget, controlUIMap = createWidgetUI(maid, widgetData, surfaceGui)
+			local display, controlUIMap = createWidgetDisplay(widgetData)
 
 			widgetController = {
 				widgetData = widgetData,
 				isActive = true,
 
-				widgetUI = widget,
+				display = display,
 
 				controlUIMap = controlUIMap,
 			}
 
-			maid:giveTask(widget.MouseButton1Down:Connect(function()
-				if creationInput:tryGrabLock(self) == false then
-					return
-				end
-
-				self.draggingWidget = widgetController
-			end))
-
-			maid:giveTask(widget.MouseEnter:Connect(function()
-				self.widgetUnderMouse = widget
-			end))
-
-			maid:giveTask(widget.MouseLeave:Connect(function()
-				if self.widgetUnderMouse == widget then
-					self.widgetUnderMouse = nil
-				end
-			end))
-
 			self.widgets[widgetName] = widgetController
+
+			local entries = table.clone(self.widgetEntries())
+			table.insert(entries, { name = widgetName, lineCount = #display.lines })
+			self.widgetEntries(entries)
 
 			table.insert(affectedMeshParts, widgetData.meshPart)
 		end
@@ -447,17 +410,32 @@ local function MeshEditingWidgets(
 
 	--[=[
 		@within MeshEditingWidgets
-		@param frame GuiObject -- the frame to stretch between the points
+		@param line LineDisplay -- the control line to stretch between the points
 		@param p1 Vector3 -- first screen point
 		@param p2 Vector3 -- second screen point
 	]=]
-	function object:drawLineBetweenPoints(frame: GuiObject, p1: Vector3, p2: Vector3)
+	function object:drawLineBetweenPoints(line: LineDisplay, p1: Vector3, p2: Vector3)
 		local guiInset = GuiService:GetGuiInset()
 		local screenDiff = p1 - p2
 		local screenMidpoint = (p1 + p2) / 2
-		frame.Position = UDim2.fromOffset(screenMidpoint.X, screenMidpoint.Y + guiInset.Y)
-		frame.Rotation = math.atan2(screenDiff.Y, screenDiff.X) * (180 / math.pi)
-		frame.Size = UDim2.fromOffset((screenDiff.X ^ 2 + screenDiff.Y ^ 2) ^ 0.5, 2)
+		line.position = UDim2.fromOffset(screenMidpoint.X, screenMidpoint.Y + guiInset.Y)
+		line.rotation = math.atan2(screenDiff.Y, screenDiff.X) * (180 / math.pi)
+		line.size = UDim2.fromOffset((screenDiff.X ^ 2 + screenDiff.Y ^ 2) ^ 0.5, 2)
+	end
+
+	--[=[
+		@within MeshEditingWidgets
+		@param widgetName string -- the widget pressed
+
+		Starts dragging a widget, if nothing else holds the input lock.
+	]=]
+	function object:beginWidgetDrag(widgetName: string)
+		local widgetController = self.widgets[widgetName]
+		if not widgetController or creationInput:tryGrabLock(self) == false then
+			return
+		end
+
+		self.draggingWidget = widgetController
 	end
 
 	--[=[

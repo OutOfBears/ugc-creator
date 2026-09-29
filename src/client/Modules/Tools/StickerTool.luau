@@ -1,4 +1,3 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
@@ -7,7 +6,6 @@ local Charm = require(ReplicatedStorage.Packages.Charm)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationInput = require("../CreationInput")
-local EditHandle = require("../UI/Components/EditHandle")
 local GeometryUtil = require(ReplicatedStorage.Shared.Modules.Utils.GeometryUtil)
 local ImageEditActions = require(ReplicatedStorage.Shared.Modules.Actions.ImageEditActions)
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
@@ -15,15 +13,10 @@ local MeshInfo = require(ReplicatedStorage.Shared.Modules.MeshInfo)
 local MeshUtils = require(ReplicatedStorage.Shared.Modules.Utils.MeshUtils)
 local ModelInfo = require(ReplicatedStorage.Shared.Modules.ModelInfo)
 local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
-local StyleSheet = require("../UI/Style/StyleSheet")
 local StyleTokens = require(ReplicatedStorage.Shared.Data.StyleTokens)
 local TextureInfo = require(ReplicatedStorage.Shared.Modules.TextureInfo)
 local ToolInput = require("../ToolInput")
-
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer.PlayerGui
-
-local HANDLE_GUI_NAME = "StickerHandleGui"
+local Types = require(ReplicatedStorage.Shared.Types)
 
 export type StickerData = {
 	textureId: string,
@@ -73,15 +66,13 @@ export type StickerTool = {
 	canvasPlacementPosition: Vector2?,
 	activePaintLayerId: string,
 	mouseDownPos: Vector2?,
-	inputGui: ScreenGui,
-	uiHandles: EditHandle.EditHandle,
+	handle: Charm.Atom<Types.EditHandleState>,
 	maid: Maid.Maid,
 	-- methods
 	selectSticker: (self: StickerTool, index: number) -> (),
-	connectHandlesToStyle: (self: StickerTool, style: StyleSheet.Style) -> (),
 	refreshMarkerPosition: (self: StickerTool, stickerData: StickerData?) -> (),
 	moveStickerBetweenParts: (self: StickerTool, stickerData: StickerData, newTargetMeshPart: MeshPart) -> (),
-	setupHandles: (self: StickerTool) -> (),
+	beginHandleGesture: (self: StickerTool, kind: string, input: InputObject) -> (),
 	dragSticker: (self: StickerTool, input: InputObject) -> (),
 	rotateSticker: (self: StickerTool, input: InputObject) -> (),
 	scaleSticker: (self: StickerTool, input: InputObject) -> (),
@@ -207,7 +198,8 @@ end
 	into UV coordinates, and redraws the sticker at those coordinates on the 2D texture.
 
 	`state` is a snapshot of the applied stickers and the selection, republished after each change,
-	for the UI to subscribe to.
+	and `handle` places the on-screen edit handle; the UI renders both and forwards presses on the
+	handle to `beginHandleGesture`.
 ]=]
 local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationInput.CreationInput): StickerTool
 	local maid = Maid.new()
@@ -249,6 +241,20 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 	object.state = Charm.atom(nil :: any)
 	publish()
 
+	object.handle = Charm.atom({ visible = false, offset = Vector2.zero, scale = 1, rotation = 0 })
+
+	local function setHandleVisible(visible: boolean)
+		local current = object.handle()
+		if current.visible ~= visible then
+			object.handle({
+				visible = visible,
+				offset = current.offset,
+				scale = current.scale,
+				rotation = current.rotation,
+			})
+		end
+	end
+
 	--[=[
 		@within StickerTool
 		@param index number -- position of the sticker in the applied list
@@ -264,14 +270,6 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 		self:refreshHandleUI()
 		publish()
-	end
-
-	--[=[
-		@within StickerTool
-		@param style StyleSheet -- the sheet that themes the handle gui
-	]=]
-	function object:connectHandlesToStyle(style: StyleSheet.Style)
-		style:linkGui(self.inputGui)
 	end
 
 	--[=[
@@ -329,89 +327,37 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 	--[=[
 		@within StickerTool
+		@param kind string -- which part of the handle was pressed: `"move"`, `"rotate"` or `"scale"`
+		@param input InputObject -- the press
 
-		Creates the handle gui and wires drag/rotate/scale. The action built while dragging is
-		only mirrored to the server once the gesture ends.
+		Starts a drag, rotate or scale gesture from the sticker handle. The action built while
+		dragging is only mirrored to the server once the gesture ends.
 	]=]
-	function object:setupHandles()
-		local handleGui = Create("ScreenGui", {
-			Name = HANDLE_GUI_NAME,
-			Enabled = false,
-			Parent = PlayerGui,
-		}) :: ScreenGui
+	function object:beginHandleGesture(kind: string, input: InputObject)
+		if not ToolInput.isValidSelectingInput(input) then
+			return
+		end
 
-		self.inputGui = maid:add(handleGui)
-
-		self.uiHandles = EditHandle()
-
-		local moveHandle = self.uiHandles.moveHandle
-		moveHandle.Parent = handleGui
-
-		local rotateHandle = self.uiHandles.rotateHandle
-		local scaleHandle = self.uiHandles.scaleHandle
-
-		maid:add(moveHandle.InputBegan:Connect(function(input)
-			if ToolInput.isValidSelectingInput(input) then
-				if self.isRotating or self.isScaling or not self.inputManager:tryGrabLock(self) then
-					return
-				end
-
-				self.isDragging = true
-			end
-		end))
-
-		maid:add(UserInputService.InputChanged:Connect(function(input)
-			if not ToolInput.isValidDraggingInput(input) then
+		if kind == "move" then
+			if self.isRotating or self.isScaling or not self.inputManager:tryGrabLock(self) then
 				return
 			end
-			if self.isDragging then
-				self:dragSticker(input)
-			elseif self.isRotating then
-				self:rotateSticker(input)
-			elseif self.isScaling then
-				self:scaleSticker(input)
+
+			self.isDragging = true
+		elseif kind == "rotate" then
+			if self.isDragging or self.isScaling or not self.inputManager:tryGrabLock(self) then
+				return
 			end
-		end))
 
-		maid:add(rotateHandle.InputBegan:Connect(function(input)
-			if ToolInput.isValidSelectingInput(input) then
-				if self.isDragging or self.isScaling or not self.inputManager:tryGrabLock(self) then
-					return
-				end
-
-				self.isRotating = true
+			self.isRotating = true
+		elseif kind == "scale" then
+			if self.isRotating or self.isDragging or not self.inputManager:tryGrabLock(self) then
+				return
 			end
-		end))
 
-		maid:add(UserInputService.InputEnded:Connect(function(input)
-			if ToolInput.isValidSelectingInput(input) then
-				if self.isRotating or self.isDragging or self.isScaling then
-					if self.lastStickerAction ~= nil then
-						Network.fire("SubmitAction", self.lastStickerAction)
-					end
-				end
-				self.isRotating = false
-				self.isDragging = false
-				self.isScaling = false
-				self.lastStickerAction = nil
-			end
-		end))
-
-		maid:add(scaleHandle.InputBegan:Connect(function(input)
-			if ToolInput.isValidSelectingInput(input) then
-				if self.isRotating or self.isDragging or not self.inputManager:tryGrabLock(self) then
-					return
-				end
-
-				self.isScaling = true
-				self.mouseDownPos = ToolInput.getInputPosition(input)
-			end
-		end))
-
-		local camera = workspace.CurrentCamera
-		maid:add(camera:GetPropertyChangedSignal("CFrame"):Connect(function()
-			self:refreshHandleUI()
-		end))
+			self.isScaling = true
+			self.mouseDownPos = ToolInput.getInputPosition(input)
+		end
 	end
 
 	--[=[
@@ -564,24 +510,20 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 		@within StickerTool
 
 		Moves the handles onto the selected sticker's screen position, or hides them when nothing
-		is selected. Builds the handles on first call.
+		is selected.
 	]=]
 	function object:refreshHandleUI()
-		if self.uiHandles == nil then
-			self:setupHandles()
-		end
-
 		if self.currentlySelectedSticker == 0 then
-			self.inputGui.Enabled = false
+			setHandleVisible(false)
 			return
 		else
-			self.inputGui.Enabled = true
+			setHandleVisible(true)
 		end
 
 		local selectedSticker: StickerData = self.appliedStickers[self.currentlySelectedSticker]
 		local marker = selectedSticker.positionMarker
 		if not marker then
-			self.inputGui.Enabled = false
+			setHandleVisible(false)
 			return
 		end
 
@@ -590,7 +532,12 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 		local moveHandlePos = camera:WorldToScreenPoint(stickerPos3d)
 
-		self.uiHandles:refresh(moveHandlePos, selectedSticker.scale, selectedSticker.rotation)
+		self.handle({
+			visible = true,
+			offset = Vector2.new(moveHandlePos.X, moveHandlePos.Y),
+			scale = selectedSticker.scale,
+			rotation = selectedSticker.rotation,
+		})
 	end
 
 	--[=[
@@ -725,7 +672,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 		self.currentlySelectedSticker = #self.appliedStickers
 
-		self.inputGui.Enabled = true
+		setHandleVisible(true)
 		self:refreshHandleUI()
 		publish()
 	end
@@ -1077,7 +1024,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 		Shows the handles and selects the most recently applied sticker.
 	]=]
 	function object:enable()
-		self.inputGui.Enabled = true
+		setHandleVisible(true)
 		if #self.appliedStickers > 0 then
 			self:selectSticker(#self.appliedStickers)
 		end
@@ -1088,7 +1035,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 		@within StickerTool
 	]=]
 	function object:disable()
-		self.inputGui.Enabled = false
+		setHandleVisible(false)
 		self.currentlySelectedSticker = 0
 		publish()
 	end
@@ -1099,6 +1046,37 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 		maid:doCleaning()
 	end
+
+	maid:add(UserInputService.InputChanged:Connect(function(input)
+		if not ToolInput.isValidDraggingInput(input) then
+			return
+		end
+		if object.isDragging then
+			object:dragSticker(input)
+		elseif object.isRotating then
+			object:rotateSticker(input)
+		elseif object.isScaling then
+			object:scaleSticker(input)
+		end
+	end))
+
+	maid:add(UserInputService.InputEnded:Connect(function(input)
+		if ToolInput.isValidSelectingInput(input) then
+			if object.isRotating or object.isDragging or object.isScaling then
+				if object.lastStickerAction ~= nil then
+					Network.fire("SubmitAction", object.lastStickerAction)
+				end
+			end
+			object.isRotating = false
+			object.isDragging = false
+			object.isScaling = false
+			object.lastStickerAction = nil
+		end
+	end))
+
+	maid:add(workspace.CurrentCamera:GetPropertyChangedSignal("CFrame"):Connect(function()
+		object:refreshHandleUI()
+	end))
 
 	object:refreshHandleUI()
 

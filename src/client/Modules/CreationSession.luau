@@ -24,7 +24,6 @@ local ModelInfo = require(ReplicatedStorage.Shared.Modules.ModelInfo)
 local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
 local PreviewTool = require("./Tools/PreviewTool")
 local StickerTool = require("./Tools/StickerTool")
-local StyleSheet = require("./UI/Style/StyleSheet")
 
 local player = Players.LocalPlayer
 
@@ -49,7 +48,6 @@ export type CreationSession = {
 	layerColorTool: LayerColorTool.LayerColorTool?,
 	accessorySwapTool: AccessorySwapTool.AccessorySwapTool?,
 	layersTool: LayersTool.LayersTool,
-	style: StyleSheet.Style,
 	panels: CreationPanels.CreationPanels,
 	screen: Charm.Atom<Screen>,
 	modal: Charm.Atom<Modal?>,
@@ -398,10 +396,6 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 			currentHumanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
 		end
 	end)
-
-	object.style = maid:add(StyleSheet())
-	object.stickerTool:connectHandlesToStyle(object.style)
-	object.kitbashTool:connectHandlesToStyle(object.style)
 
 	object.panels = maid:add(CreationPanels(object))
 

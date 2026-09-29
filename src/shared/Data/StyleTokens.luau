@@ -348,8 +348,8 @@ local fonts: FontTable = {
 --[=[
 	@class StyleTokens
 
-	The visual design tokens the style manager applies to UI components — colors, strokes, spacing,
-	component sizes, and the BuilderSans font pairings built from them.
+	The visual design tokens the React UI styles itself from (through `useTheme`) — colors, strokes,
+	spacing, component sizes, and the BuilderSans font pairings built from them.
 ]=]
 local tokens: StyleTokens = {
 	style = style,

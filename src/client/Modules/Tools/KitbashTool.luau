@@ -1,4 +1,3 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
@@ -8,23 +7,17 @@ local Charm = require(ReplicatedStorage.Packages.Charm)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationInput = require("../CreationInput")
-local EditHandle = require("../UI/Components/EditHandle")
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local MeshEditActions = require(ReplicatedStorage.Shared.Modules.Actions.MeshEditActions)
 local MeshUtils = require(ReplicatedStorage.Shared.Modules.Utils.MeshUtils)
 local ModelDisplay = require("../ModelDisplay")
 local ModelInfo = require(ReplicatedStorage.Shared.Modules.ModelInfo)
 local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
-local StyleSheet = require("../UI/Style/StyleSheet")
 local StyleTokens = require(ReplicatedStorage.Shared.Data.StyleTokens)
 local ToolInput = require("../ToolInput")
-
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Types = require(ReplicatedStorage.Shared.Types)
 
 local KitbashPieces = AssetUtil.resolve("KitbashPieces")
-
-local HANDLE_GUI_NAME = "KitbashHandleGui"
 
 export type KitbashPieceData = {
 	name: string,
@@ -58,11 +51,9 @@ export type KitbashTool = {
 	isRotating: boolean,
 	isScaling: boolean,
 	mouseDownPos: Vector2?,
-	inputGui: ScreenGui,
-	uiHandles: EditHandle.EditHandle,
+	handle: Charm.Atom<Types.EditHandleState>,
 	maid: Maid.Maid,
 	-- methods
-	connectHandlesToStyle: (self: KitbashTool, style: StyleSheet.Style) -> (),
 	refreshMarkerPosition: (self: KitbashTool, selectedPiece: KitbashPieceData?) -> (),
 	enable: (self: KitbashTool) -> (),
 	disable: (self: KitbashTool) -> (),
@@ -71,7 +62,7 @@ export type KitbashTool = {
 	refreshWrapDeformer: (self: KitbashTool, targetMeshPart: MeshPart) -> (),
 	unmergePiece: (self: KitbashTool, pieceData: KitbashPieceData, isDeleting: boolean?) -> (),
 	mergeCurrentPiece: (self: KitbashTool) -> (),
-	setupHandles: (self: KitbashTool) -> (),
+	beginHandleGesture: (self: KitbashTool, kind: string, input: InputObject) -> (),
 	refreshHandleUI: (self: KitbashTool) -> (),
 	updatePieceTransform: (self: KitbashTool, pieceData: KitbashPieceData) -> (),
 	selectPiece: (self: KitbashTool, pieceName: string, minScale: number?, maxScale: number?) -> (),
@@ -98,7 +89,8 @@ end
 	top-left cell holds the target's own texture and each merged piece claims one of the
 	remaining cells, with its UVs remapped into that cell.
 
-	`pieceCount` tracks how many pieces are placed, for the UI to subscribe to.
+	`pieceCount` tracks how many pieces are placed and `handle` places the on-screen edit handle;
+	the UI renders both and forwards presses on the handle to `beginHandleGesture`.
 ]=]
 local function KitbashTool(
 	modelInfo: ModelInfo.ModelInfo,
@@ -121,12 +113,18 @@ local function KitbashTool(
 
 	object.maid = maid
 
-	--[=[
-		@within KitbashTool
-		@param style StyleSheet -- the sheet that themes the handle gui
-	]=]
-	function object:connectHandlesToStyle(style: StyleSheet.Style)
-		style:linkGui(self.inputGui)
+	object.handle = Charm.atom({ visible = false, offset = Vector2.zero, scale = 1, rotation = 0 })
+
+	local function setHandleVisible(visible: boolean)
+		local current = object.handle()
+		if current.visible ~= visible then
+			object.handle({
+				visible = visible,
+				offset = current.offset,
+				scale = current.scale,
+				rotation = current.rotation,
+			})
+		end
 	end
 
 	--[=[
@@ -156,7 +154,7 @@ local function KitbashTool(
 		if #self.placedPieces > 0 then
 			self.currentlySelectedPiece = #self.placedPieces
 
-			self.inputGui.Enabled = true
+			setHandleVisible(true)
 			self:refreshHandleUI()
 		end
 	end
@@ -165,9 +163,7 @@ local function KitbashTool(
 		@within KitbashTool
 	]=]
 	function object:disable()
-		if self.inputGui then
-			self.inputGui.Enabled = false
-		end
+		setHandleVisible(false)
 
 		self.currentlySelectedPiece = nil
 		self.isDragging = false
@@ -222,11 +218,11 @@ local function KitbashTool(
 		if #self.placedPieces > 0 then
 			self.currentlySelectedPiece = math.min(self.currentlySelectedPiece, #self.placedPieces)
 
-			self.inputGui.Enabled = true
+			setHandleVisible(true)
 			self:refreshHandleUI()
 		else
 			self.currentlySelectedPiece = nil
-			self.inputGui.Enabled = false
+			setHandleVisible(false)
 		end
 	end
 
@@ -357,107 +353,48 @@ local function KitbashTool(
 
 	--[=[
 		@within KitbashTool
+		@param kind string -- which part of the handle was pressed: `"move"`, `"rotate"` or `"scale"`
+		@param input InputObject -- the press
 
-		Creates the handle gui and wires drag/rotate/scale. Each gesture unmerges the piece so it
-		can be moved, and merges it again on release.
+		Starts a drag, rotate or scale gesture from the piece handle. The gesture unmerges the piece
+		so it can be moved, and it merges again on release.
 	]=]
-	function object:setupHandles()
-		local handleGui = Create("ScreenGui", {
-			Name = HANDLE_GUI_NAME,
-			Enabled = false,
-			Parent = PlayerGui,
-		}) :: ScreenGui
+	function object:beginHandleGesture(kind: string, input: InputObject)
+		if not ToolInput.isValidSelectingInput(input) then
+			return
+		end
 
-		self.inputGui = maid:add(handleGui)
-
-		self.uiHandles = EditHandle()
-
-		local moveHandle = self.uiHandles.moveHandle
-		moveHandle.Parent = handleGui
-
-		local rotateHandle = self.uiHandles.rotateHandle
-		local scaleHandle = self.uiHandles.scaleHandle
-
-		maid:add(moveHandle.InputBegan:Connect(function(input)
-			if ToolInput.isValidSelectingInput(input) then
-				if self.isRotating or self.isScaling or not self.inputManager:tryGrabLock(self) then
-					return
-				end
-
-				local pieceData = self.placedPieces[self.currentlySelectedPiece]
-				if pieceData and pieceData.isMerged then
-					self:unmergePiece(pieceData)
-				end
-				self.isDragging = true
+		if kind == "move" then
+			if self.isRotating or self.isScaling or not self.inputManager:tryGrabLock(self) then
+				return
 			end
-		end))
-
-		maid:add(UserInputService.InputChanged:Connect(function(input)
-			if self.isDragging and ToolInput.isValidDraggingInput(input) then
-				self:dragPiece(input)
-			elseif self.isRotating and ToolInput.isValidDraggingInput(input) then
-				self:rotatePiece(input)
-			elseif self.isScaling and ToolInput.isValidDraggingInput(input) then
-				self:scalePiece(input)
+		elseif kind == "rotate" then
+			if self.isDragging or self.isScaling or self.inputManager:tryGrabLock(self) == false then
+				return
 			end
-		end))
-
-		maid:add(UserInputService.InputEnded:Connect(function(input)
-			if ToolInput.isValidSelectingInput(input) then
-				if self.isDragging then
-					self.isDragging = false
-					self:mergeCurrentPiece()
-				elseif self.isRotating then
-					self.isRotating = false
-					self:mergeCurrentPiece()
-				elseif self.isScaling then
-					self.isScaling = false
-					self:mergeCurrentPiece()
-				end
+		elseif kind == "scale" then
+			if self.isDragging or self.isRotating or self.inputManager:tryGrabLock(self) == false then
+				return
 			end
-		end))
+		else
+			return
+		end
 
-		maid:add(rotateHandle.InputBegan:Connect(function(input)
-			if ToolInput.isValidSelectingInput(input) then
-				if self.isDragging or self.isScaling then
-					return
-				end
-				if self.inputManager:tryGrabLock(self) == false then
-					return
-				end
+		local pieceData = self.placedPieces[self.currentlySelectedPiece]
+		if pieceData and pieceData.isMerged then
+			self:unmergePiece(pieceData)
+		end
 
-				local pieceData = self.placedPieces[self.currentlySelectedPiece]
-				if pieceData and pieceData.isMerged then
-					self:unmergePiece(pieceData)
-				end
-				self.isRotating = true
-			end
-		end))
+		if kind == "move" then
+			self.isDragging = true
+		elseif kind == "rotate" then
+			self.isRotating = true
+		else
+			self.isScaling = true
 
-		maid:add(scaleHandle.InputBegan:Connect(function(input)
-			if ToolInput.isValidSelectingInput(input) then
-				if self.isDragging or self.isRotating then
-					return
-				end
-				if self.inputManager:tryGrabLock(self) == false then
-					return
-				end
-
-				local pieceData = self.placedPieces[self.currentlySelectedPiece]
-				if pieceData and pieceData.isMerged then
-					self:unmergePiece(pieceData)
-				end
-
-				self.isScaling = true
-
-				local inputPosition = ToolInput.getInputPosition(input)
-				self.mouseDownPos = Vector2.new(inputPosition.X, inputPosition.Y)
-			end
-		end))
-
-		maid:add(workspace.CurrentCamera:GetPropertyChangedSignal("CFrame"):Connect(function()
-			self:refreshHandleUI()
-		end))
+			local inputPosition = ToolInput.getInputPosition(input)
+			self.mouseDownPos = Vector2.new(inputPosition.X, inputPosition.Y)
+		end
 	end
 
 	--[=[
@@ -468,10 +405,10 @@ local function KitbashTool(
 	]=]
 	function object:refreshHandleUI()
 		if not self.currentlySelectedPiece then
-			self.inputGui.Enabled = false
+			setHandleVisible(false)
 			return
 		else
-			self.inputGui.Enabled = true
+			setHandleVisible(true)
 		end
 
 		local pieceData = self.placedPieces[self.currentlySelectedPiece]
@@ -480,7 +417,12 @@ local function KitbashTool(
 
 		local screenPos = camera:WorldToScreenPoint(piece3dPos)
 
-		self.uiHandles:refresh(screenPos, pieceData.scale, pieceData.rotation)
+		self.handle({
+			visible = true,
+			offset = Vector2.new(screenPos.X, screenPos.Y),
+			scale = pieceData.scale,
+			rotation = pieceData.rotation,
+		})
 	end
 
 	--[=[
@@ -734,7 +676,34 @@ local function KitbashTool(
 		self.placedPieces = {}
 	end
 
-	object:setupHandles()
+	maid:add(UserInputService.InputChanged:Connect(function(input)
+		if object.isDragging and ToolInput.isValidDraggingInput(input) then
+			object:dragPiece(input)
+		elseif object.isRotating and ToolInput.isValidDraggingInput(input) then
+			object:rotatePiece(input)
+		elseif object.isScaling and ToolInput.isValidDraggingInput(input) then
+			object:scalePiece(input)
+		end
+	end))
+
+	maid:add(UserInputService.InputEnded:Connect(function(input)
+		if ToolInput.isValidSelectingInput(input) then
+			if object.isDragging then
+				object.isDragging = false
+				object:mergeCurrentPiece()
+			elseif object.isRotating then
+				object.isRotating = false
+				object:mergeCurrentPiece()
+			elseif object.isScaling then
+				object.isScaling = false
+				object:mergeCurrentPiece()
+			end
+		end
+	end))
+
+	maid:add(workspace.CurrentCamera:GetPropertyChangedSignal("CFrame"):Connect(function()
+		object:refreshHandleUI()
+	end))
 
 	for _, meshPart in modelInfo:getMeshParts() do
 		maid:add(meshPart:GetPropertyChangedSignal("Position"):Connect(function()
