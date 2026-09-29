@@ -17,6 +17,7 @@ local createElement = React.createElement
 export type KitbashPanelProps = {
 	visible: boolean,
 	onClose: () -> (),
+	frameRef: ((Frame?) -> ())?,
 }
 
 --[=[
@@ -44,6 +45,7 @@ local function KitbashPanel(props: KitbashPanelProps)
 		title = CreationStrings.panelTitles.kitbash,
 		visible = props.visible,
 		onClose = props.onClose,
+		frameRef = props.frameRef,
 		onTrash = function()
 			kitbashTool:deleteCurrentPiece()
 		end,

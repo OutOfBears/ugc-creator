@@ -21,6 +21,7 @@ local useMemo = React.useMemo
 export type PatternPanelProps = {
 	visible: boolean,
 	onClose: () -> (),
+	frameRef: ((Frame?) -> ())?,
 }
 
 --[=[
@@ -114,6 +115,7 @@ local function PatternPanel(props: PatternPanelProps)
 		title = CreationStrings.panelTitles.pattern,
 		visible = props.visible,
 		onClose = props.onClose,
+		frameRef = props.frameRef,
 		onTrash = function()
 			stickerTool:deleteCurrentSticker()
 		end,

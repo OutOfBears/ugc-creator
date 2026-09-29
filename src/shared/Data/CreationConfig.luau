@@ -36,6 +36,7 @@ export type CreationConfig = {
 	defaultEraserSize: number,
 	defaultColorPickerColor: { h: number, s: number, v: number },
 	regionOrdering: { [string]: number },
+	message: { slideSeconds: number, holdSeconds: number, hiddenPosition: UDim2, shownPosition: UDim2 },
 	scaleDragSensitivity: number,
 	minStickerPadding: number,
 	maxStickerPadding: number,
@@ -214,6 +215,12 @@ local config: CreationConfig = {
 	defaultBrushSize = 10,
 	defaultEraserSize = 5,
 	defaultColorPickerColor = { h = 0, s = 1, v = 1 },
+	message = {
+		slideSeconds = 1,
+		holdSeconds = 10,
+		hiddenPosition = UDim2.new(0.5, -200, -0.2, 0),
+		shownPosition = UDim2.new(0.5, -200, 0, 0),
+	},
 	regionOrdering = {
 		RobotModel = 1,
 		TShirtModel = 1,

@@ -20,6 +20,7 @@ local createElement = React.createElement
 export type LayersPanelProps = {
 	visible: boolean,
 	onClose: () -> (),
+	frameRef: ((Frame?) -> ())?,
 }
 
 --[=[
@@ -148,6 +149,7 @@ local function LayersPanel(props: LayersPanelProps)
 		title = CreationStrings.layersPanelTitle,
 		visible = props.visible,
 		onClose = props.onClose,
+		frameRef = props.frameRef,
 		onTrash = function()
 			layersTool:deleteLayer(state.activeLayerId)
 		end,

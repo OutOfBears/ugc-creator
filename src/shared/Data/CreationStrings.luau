@@ -31,6 +31,10 @@ export type CreationStrings = {
 	modelDisplayName: { [string]: string },
 	regionSectionFormat: string,
 
+	modalButtons: { ok: string, cancel: string, continue: string },
+	previewTargets: { string },
+	loading: string,
+
 	panelTitles: {
 		brush: string,
 		eraser: string,
@@ -97,6 +101,14 @@ local strings: CreationStrings = {
 		HatModel = "Hat",
 	},
 	regionSectionFormat = "%s Section",
+
+	modalButtons = {
+		ok = "Ok",
+		cancel = "Cancel",
+		continue = "Continue",
+	},
+	previewTargets = { "Default", "My Avatar" },
+	loading = "Loading…",
 
 	panelTitles = {
 		brush = "Paintbrush",

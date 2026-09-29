@@ -11,24 +11,25 @@ local createRoot = ReactRoblox.createRoot
 
 local player = Players.LocalPlayer
 
-local uiContainer: ScreenGui? = nil
+local uiContainer: Folder? = nil
 
 --[=[
 	@class UIController
 	@client
 
-	Mounts every ModuleScript in `Interfaces.Views` into its own `ScreenGui` under the `UI`
-	ScreenGui in PlayerGui, passing that ScreenGui as the view's `playerGui` prop.
+	Mounts every ModuleScript in `Interfaces.Views` into its own `ScreenGui` under a `UI` folder in
+	PlayerGui, passing that ScreenGui as the view's `playerGui` prop. A folder rather than a
+	ScreenGui holds them so each view's display order and insets act as a top-level ScreenGui's
+	would; a view sets them with `useScreenGui`.
 ]=]
 local UIController = {} :: Types.Controller
 UIController.priority = math.huge
 
 function UIController.onInit()
-	uiContainer = Create("ScreenGui", {
+	uiContainer = Create("Folder", {
 		Name = "UI",
-		ResetOnSpawn = false,
 		Parent = player:WaitForChild("PlayerGui"),
-	}) :: ScreenGui
+	}) :: Folder
 end
 
 function UIController.onRun()
@@ -46,6 +47,7 @@ function UIController.onRun()
 		local viewContainer = Create("ScreenGui", {
 			Name = `{view.Name}View`,
 			ResetOnSpawn = false,
+			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 			Parent = uiContainer,
 		})
 

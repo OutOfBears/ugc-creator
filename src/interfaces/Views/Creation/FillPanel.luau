@@ -17,6 +17,7 @@ local useMemo = React.useMemo
 export type FillPanelProps = {
 	visible: boolean,
 	onClose: () -> (),
+	frameRef: ((Frame?) -> ())?,
 }
 
 --[=[
@@ -39,6 +40,7 @@ local function FillPanel(props: FillPanelProps)
 		title = CreationStrings.panelTitles.recolor,
 		visible = props.visible,
 		onClose = props.onClose,
+		frameRef = props.frameRef,
 		onTrash = function()
 			fabricTool:clearAll()
 		end,

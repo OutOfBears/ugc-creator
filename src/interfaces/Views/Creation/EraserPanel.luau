@@ -14,6 +14,7 @@ local createElement = React.createElement
 export type EraserPanelProps = {
 	visible: boolean,
 	onClose: () -> (),
+	frameRef: ((Frame?) -> ())?,
 }
 
 --[=[
@@ -30,6 +31,7 @@ local function EraserPanel(props: EraserPanelProps)
 		title = CreationStrings.panelTitles.eraser,
 		visible = props.visible,
 		onClose = props.onClose,
+		frameRef = props.frameRef,
 		onTrash = function()
 			brushTool:clearAll()
 		end,

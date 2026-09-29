@@ -16,6 +16,7 @@ local createElement = React.createElement
 export type AccessoriesPanelProps = {
 	visible: boolean,
 	onClose: () -> (),
+	frameRef: ((Frame?) -> ())?,
 }
 
 --[=[
@@ -62,6 +63,7 @@ local function AccessoriesPanel(props: AccessoriesPanelProps)
 		title = CreationStrings.panelTitles.accessories,
 		visible = props.visible,
 		onClose = props.onClose,
+		frameRef = props.frameRef,
 		onTrash = function() end,
 	}, {
 		scrollFrame = createElement(ScrollFrame, {

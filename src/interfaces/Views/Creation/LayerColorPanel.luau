@@ -22,6 +22,7 @@ local useState = React.useState
 export type LayerColorPanelProps = {
 	visible: boolean,
 	onClose: () -> (),
+	frameRef: ((Frame?) -> ())?,
 }
 
 local NO_ACCESSORIES = Charm.atom({})
@@ -181,6 +182,7 @@ local function LayerColorPanel(props: LayerColorPanelProps)
 		title = CreationStrings.panelTitles.layerColor,
 		visible = props.visible,
 		onClose = props.onClose,
+		frameRef = props.frameRef,
 		onTrash = function() end,
 	}, {
 		scrollFrame = createElement(ScrollFrame, {

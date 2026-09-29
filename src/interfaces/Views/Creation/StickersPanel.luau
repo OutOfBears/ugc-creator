@@ -17,6 +17,7 @@ local createElement = React.createElement
 export type StickersPanelProps = {
 	visible: boolean,
 	onClose: () -> (),
+	frameRef: ((Frame?) -> ())?,
 }
 
 --[=[
@@ -44,6 +45,7 @@ local function StickersPanel(props: StickersPanelProps)
 		title = CreationStrings.panelTitles.stickers,
 		visible = props.visible,
 		onClose = props.onClose,
+		frameRef = props.frameRef,
 		onTrash = function()
 			stickerTool:deleteCurrentSticker()
 		end,

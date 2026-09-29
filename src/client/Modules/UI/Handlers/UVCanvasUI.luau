@@ -81,7 +81,7 @@ export type UVCanvasUI = {
 	Every tool can show it; in `paint` and `sticker` modes the player also paints, erases and places
 	stickers on it directly, while `view` mode only zooms and pans. Strokes reuse [BrushTool]'s linear brush
 	and stickers reuse [StickerTool]'s flat sticker action, so the model updates live and the server
-	replays the same actions it already knows. Owned by [EditingUI].
+	replays the same actions it already knows. Owned by [CreationPanels].
 ]=]
 local function UVCanvasUI(
 	session: any,

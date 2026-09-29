@@ -17,6 +17,7 @@ local createElement = React.createElement
 export type BrushPanelProps = {
 	visible: boolean,
 	onClose: () -> (),
+	frameRef: ((Frame?) -> ())?,
 }
 
 --[=[
@@ -34,6 +35,7 @@ local function BrushPanel(props: BrushPanelProps)
 		title = CreationStrings.panelTitles.brush,
 		visible = props.visible,
 		onClose = props.onClose,
+		frameRef = props.frameRef,
 		onTrash = function()
 			brushTool:clearAll()
 		end,

@@ -14,6 +14,7 @@ export type PanelProps = {
 	visible: boolean,
 	onClose: () -> (),
 	onTrash: () -> (),
+	frameRef: ((Frame?) -> ())?,
 	children: React.ReactNode?,
 }
 
@@ -53,6 +54,7 @@ local Panel = memo(function(props: PanelProps)
 		Position = layout.PanelPosition,
 		Size = layout.PanelSize,
 		Visible = props.visible,
+		ref = props.frameRef,
 	}, {
 		padding = createElement("UIPadding", {
 			PaddingBottom = tokens.Padding.XLarge,
