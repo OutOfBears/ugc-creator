@@ -37,6 +37,8 @@ export type CreationConfig = {
 	maxStickerPadding: number,
 	defaultTiledStickerScale: number,
 	accessoryStickerScale: number,
+	minStickerPixelSize: number,
+	projectedSticker: { fadeAngle: number, oversample: number },
 
 	textureResolutionSteps: { Vector2 },
 
@@ -210,6 +212,11 @@ local config: CreationConfig = {
 	maxStickerPadding = 100,
 	defaultTiledStickerScale = 0.5,
 	accessoryStickerScale = 0.5,
+	minStickerPixelSize = 8,
+	projectedSticker = {
+		fadeAngle = 80,
+		oversample = 1.5,
+	},
 
 	textureResolutionSteps = {
 		Vector2.new(1024, 1024),

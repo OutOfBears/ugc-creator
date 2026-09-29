@@ -67,6 +67,8 @@ export type TextureInfo = {
 	modelTextureInfo: ModelTextureInfo,
 	lastCreatedEditableImage: EditableImage?,
 	lastCreatedEditableImageTextureId: string?,
+	stickerImage: EditableImage?,
+	stickerImageKey: string?,
 	memorySafeEditableImage: EditableImage?,
 	paintLayers: { PaintLayer },
 	stickerPaintLayers: { [string]: string },
@@ -105,6 +107,7 @@ export type TextureInfo = {
 	getOriginalTextureId: (self: TextureInfo, meshPart: MeshPart) -> string,
 	getOutputTextureByName: (self: TextureInfo, meshPartName: string) -> EditableImage?,
 	getOrCreateEditableImageByTextureId: (self: TextureInfo, textureId: string) -> EditableImage,
+	getStickerImage: (self: TextureInfo, textureId: string, pixelSize: number) -> EditableImage,
 	meshPartsShareLayer: (self: TextureInfo, meshPart1: MeshPart, meshPart2: MeshPart) -> boolean,
 	destroy: (self: TextureInfo) -> (),
 }
@@ -1163,6 +1166,66 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 	--[=[
 		@within TextureInfo
+		@param textureId string -- the sticker texture
+		@param pixelSize number -- the size the sticker lands at on the layer, along its longer side
+		@return EditableImage -- the sticker resampled to that size, or the source image when it already is
+
+		Drawing and projecting don't filter a big shrink, so a sticker drawn much smaller than its
+		source aliases. It is halved step by step with bilinear filtering instead, which averages
+		the texels it drops. Only the latest size is kept, so resizing a sticker re-resamples it.
+	]=]
+	function object:getStickerImage(textureId: string, pixelSize: number): EditableImage
+		local source = self:getOrCreateEditableImageByTextureId(textureId)
+		local sourceSide = math.max(source.Size.X, source.Size.Y)
+		local side = math.clamp(math.round(pixelSize), CreationConfig.minStickerPixelSize, sourceSide)
+		if side == sourceSide then
+			return source
+		end
+
+		local key = `{textureId}:{side}`
+		if self.stickerImageKey == key and self.stickerImage then
+			return self.stickerImage
+		end
+
+		if self.stickerImage then
+			self.stickerImage:Destroy()
+			self.stickerImage = nil
+		end
+
+		local targetSize = Vector2.new(
+			math.max(math.round(source.Size.X * side / sourceSide), 1),
+			math.max(math.round(source.Size.Y * side / sourceSide), 1)
+		)
+
+		local current = source
+		repeat
+			local nextSize = Vector2.new(
+				math.max(targetSize.X, math.ceil(current.Size.X / 2)),
+				math.max(targetSize.Y, math.ceil(current.Size.Y / 2))
+			)
+			local resampled = AssetService:CreateEditableImage({ Size = nextSize })
+			if not resampled then
+				throwMemoryError()
+			end
+
+			resampled:DrawImageTransformed(nextSize / 2, nextSize / current.Size, 0, current, {
+				CombineType = Enum.ImageCombineType.Overwrite,
+			})
+
+			if current ~= source then
+				current:Destroy()
+			end
+			current = resampled
+		until current.Size == targetSize
+
+		self.stickerImage = current
+		self.stickerImageKey = key
+
+		return current
+	end
+
+	--[=[
+		@within TextureInfo
 		@param meshPart1 MeshPart -- the first part
 		@param meshPart2 MeshPart -- the second part
 		@return boolean -- true if both parts draw onto the same layer stack
@@ -1198,6 +1261,9 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 		if self.lastCreatedEditableImage then
 			self.lastCreatedEditableImage:Destroy()
+		end
+		if self.stickerImage then
+			self.stickerImage:Destroy()
 		end
 		for _, reservedStickerEI in pairs(self.reservedStickerEditableImageMap) do
 			reservedStickerEI:Destroy()

@@ -43,6 +43,7 @@ export type ModelInfo = {
 	accessorySelections: { [string]: number },
 	accessoryFaceIds: { [string]: { number } },
 	colorCompositors: { [string]: LayerColorCompositor.LayerColorCompositor | false },
+	surfaceSamples: { [MeshPart]: { centroids: { Vector3 }, surfaceAreas: { number }, uvAreas: { number } } },
 	-- methods
 	getModel: (self: ModelInfo) -> Model,
 	getBlankName: (self: ModelInfo) -> string,
@@ -58,6 +59,7 @@ export type ModelInfo = {
 	getColorTargetPart: (self: ModelInfo) -> MeshPart?,
 	resolveColorKey: (self: ModelInfo, key: string) -> (ColorLayers.Catalog?, number, string),
 	setAccessory: (self: ModelInfo, slotName: string, optionIndex: number) -> (),
+	getTexelsPerStud: (self: ModelInfo, meshPart: MeshPart, center: Vector3?, radius: number?) -> number,
 	bakeLayerColors: (self: ModelInfo, cell: number?) -> (),
 	getStickerPatterningEnabled: (self: ModelInfo) -> boolean?,
 	getWidgetMeshEditingEnabled: (self: ModelInfo) -> boolean?,
@@ -159,6 +161,7 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 	object.accessorySelections = {}
 	object.accessoryFaceIds = {}
 	object.colorCompositors = {}
+	object.surfaceSamples = {}
 
 	--[=[
 		@within ModelInfo
@@ -342,7 +345,76 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 			})
 		end
 
+		table.clear(self.surfaceSamples)
 		self:bakeLayerColors(slot.atlasSlot)
+	end
+
+	--[=[
+		@within ModelInfo
+		@param meshPart MeshPart -- the part to measure
+		@param center Vector3? -- a point in the part's local space to measure around, or nil for the whole part
+		@param radius number? -- how far from `center` to measure, in studs
+		@return number -- color-map texels per stud of that surface
+
+		Compares the surface area of the triangles against the texture area their UVs cover. UV layouts
+		give some areas (the face) more texels than others, so a sticker should measure where it lands.
+		Per-triangle areas are cached until the mesh changes shape (an accessory swap); a query that
+		finds no triangles falls back to the whole part.
+	]=]
+	function object:getTexelsPerStud(meshPart: MeshPart, center: Vector3?, radius: number?): number
+		local samples = self.surfaceSamples[meshPart]
+		if not samples then
+			local editableMesh = self.meshInfo:getEditableMesh(meshPart)
+			local scaleFactor = self.meshInfo:getScaleFactorMap()[meshPart] or Vector3.one
+			local imageSize = self.textureInfo:getImageSize(meshPart)
+
+			samples = { centroids = {}, surfaceAreas = {}, uvAreas = {} }
+			for _, faceId in editableMesh:GetFaces() do
+				local vertices = editableMesh:GetFaceVertices(faceId)
+				local uvIds = editableMesh:GetFaceUVs(faceId)
+				if #vertices ~= 3 or #uvIds ~= 3 then
+					continue
+				end
+
+				local a = editableMesh:GetPosition(vertices[1]) / scaleFactor
+				local b = editableMesh:GetPosition(vertices[2]) / scaleFactor
+				local c = editableMesh:GetPosition(vertices[3]) / scaleFactor
+
+				local uvA = (editableMesh:GetUV(uvIds[1]) :: Vector2) * imageSize
+				local uvB = (editableMesh:GetUV(uvIds[2]) :: Vector2) * imageSize
+				local uvC = (editableMesh:GetUV(uvIds[3]) :: Vector2) * imageSize
+
+				table.insert(samples.centroids, (a + b + c) / 3)
+				table.insert(samples.surfaceAreas, (b - a):Cross(c - a).Magnitude / 2)
+				table.insert(
+					samples.uvAreas,
+					math.abs((uvB.X - uvA.X) * (uvC.Y - uvA.Y) - (uvC.X - uvA.X) * (uvB.Y - uvA.Y)) / 2
+				)
+			end
+			self.surfaceSamples[meshPart] = samples
+		end
+
+		local function measure(isInRange: (index: number) -> boolean): number?
+			local surfaceArea, uvArea = 0, 0
+			for index, area in samples.surfaceAreas do
+				if isInRange(index) then
+					surfaceArea += area
+					uvArea += samples.uvAreas[index]
+				end
+			end
+
+			return if surfaceArea > 0 then math.sqrt(uvArea / surfaceArea) else nil
+		end
+
+		local localDensity = if center and radius
+			then measure(function(index)
+				return (samples.centroids[index] - center).Magnitude <= radius
+			end)
+			else nil
+
+		return localDensity or measure(function()
+			return true
+		end) or self.textureInfo:getImageSize(meshPart).X
 	end
 
 	--[=[

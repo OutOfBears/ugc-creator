@@ -645,11 +645,14 @@ ImageEditActions.StickerAction = {
 			TextureUtils.clear(stickerLayer)
 		end
 
-		local stickerTexture = textureInfo:getOrCreateEditableImageByTextureId(actionMetaData.textureId)
+		local source = textureInfo:getOrCreateEditableImageByTextureId(actionMetaData.textureId)
+		local drawnSize = math.max(source.Size.X, source.Size.Y) * actionMetaData.scale * 0.5
+		local stickerTexture = textureInfo:getStickerImage(actionMetaData.textureId, drawnSize)
+		local drawScale = drawnSize / math.max(stickerTexture.Size.X, stickerTexture.Size.Y)
 		local currentRegionMap = textureInfo:getMeshPartRegion(actionMetaData.targetMeshPartName)
 
 		if currentRegionMap == nil then
-			local scaleVector = Vector2.new(actionMetaData.scale, actionMetaData.scale) * 0.5
+			local scaleVector = Vector2.one * drawScale
 			stickerLayer:DrawImageTransformed(
 				actionMetaData.position,
 				scaleVector,
@@ -663,7 +666,7 @@ ImageEditActions.StickerAction = {
 		else
 			local prevStickerBuffer = stickerLayer:ReadPixelsBuffer(Vector2.zero, stickerLayer.Size)
 
-			local scaleVector = Vector2.new(actionMetaData.scale, actionMetaData.scale) * 0.5
+			local scaleVector = Vector2.one * drawScale
 			stickerLayer:DrawImageTransformed(
 				actionMetaData.position,
 				scaleVector,
@@ -770,7 +773,10 @@ ImageEditActions.ProjectedStickerAction = {
 			TextureUtils.clear(stickerLayer)
 		end
 
-		local stickerTexture = textureInfo:getOrCreateEditableImageByTextureId(actionMetaData.textureId)
+		local texelsPerStud =
+			modelInfo:getTexelsPerStud(targetMeshPart, actionMetaData.position, actionMetaData.scale / 2)
+		local projectedSize = actionMetaData.scale * texelsPerStud * CreationConfig.projectedSticker.oversample
+		local stickerTexture = textureInfo:getStickerImage(actionMetaData.textureId, projectedSize)
 
 		local projectionRotater = CFrame.fromAxisAngle(actionMetaData.direction, actionMetaData.rotation)
 
@@ -786,7 +792,7 @@ ImageEditActions.ProjectedStickerAction = {
 			ColorBlendType = Enum.ImageCombineType.BlendSourceOver,
 			AlphaBlendType = Enum.ImageAlphaType.Default,
 			BlendIntensity = 1,
-			FadeAngle = 45.0,
+			FadeAngle = CreationConfig.projectedSticker.fadeAngle,
 		}
 
 		local meshInfo = modelInfo:getMeshInfo()
@@ -913,7 +919,9 @@ ImageEditActions.TiledStickerAction = {
 		upLimit = math.floor(upLimit / upScale)
 		downLimit = math.ceil(downLimit / upScale)
 
-		local scaleVector = Vector2.new(clampScale, clampScale) * globalScale
+		local drawnSize = math.max(stickerTexture.Size.X, stickerTexture.Size.Y) * clampScale * globalScale
+		local tileTexture = textureInfo:getStickerImage(actionMetaData.textureId, drawnSize)
+		local scaleVector = Vector2.one * (drawnSize / math.max(tileTexture.Size.X, tileTexture.Size.Y))
 
 		if kitbashingEnabled then
 			local temporaryLayer = AssetService:CreateEditableImage({ Size = layerSize })
@@ -929,7 +937,7 @@ ImageEditActions.TiledStickerAction = {
 						actionMetaData.texturePosition + (yIter * rightVec) + (xIter * upVec),
 						scaleVector,
 						actionMetaData.rotation,
-						stickerTexture,
+						tileTexture,
 						{
 							CombineType = Enum.ImageCombineType.BlendSourceOver,
 							SamplingMode = Enum.ResamplerMode.Default,
@@ -954,7 +962,7 @@ ImageEditActions.TiledStickerAction = {
 						actionMetaData.texturePosition + (yIter * rightVec) + (xIter * upVec),
 						scaleVector,
 						actionMetaData.rotation,
-						stickerTexture,
+						tileTexture,
 						{
 							CombineType = Enum.ImageCombineType.BlendSourceOver,
 							SamplingMode = Enum.ResamplerMode.Default,
