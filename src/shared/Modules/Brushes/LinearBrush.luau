@@ -1,4 +1,3 @@
-local EdgeBleed = require("../Utils/EdgeBleed")
 local ImageEditActions = require("../Actions/ImageEditActions")
 local TextureInfo = require("../TextureInfo")
 local TextureUtils = require("../Utils/TextureUtils")
@@ -16,6 +15,8 @@ export type LinearBrush = {
 	penSize: number,
 	penColor: Color3,
 	penTransparency: number,
+	tipId: string?,
+	stamp: EditableImage?,
 	meshPart: MeshPart?,
 	textureInfo: TextureInfo.TextureInfo,
 	targetEditableImage: EditableImage,
@@ -29,6 +30,7 @@ export type LinearBrush = {
 	setColor: (self: LinearBrush, newColor: Color3) -> (),
 	setSize: (self: LinearBrush, newSize: number) -> (),
 	setTransparency: (self: LinearBrush, newTransparency: number) -> (),
+	setTip: (self: LinearBrush, tipId: string) -> (),
 	setCurrentMeshPart: (self: LinearBrush, meshPart: MeshPart) -> (),
 	setColorBlendType: (self: LinearBrush, colorBlendType: Enum.ImageCombineType) -> (),
 	setAlphaBlendType: (self: LinearBrush, alphaBlendType: Enum.ImageAlphaType) -> (),
@@ -97,6 +99,14 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 	]=]
 	function object:setTransparency(newTransparency: number)
 		self.penTransparency = newTransparency
+	end
+
+	--[=[
+		@within LinearBrush
+		@param tipId string -- the [BrushTips] tip stamped from now on
+	]=]
+	function object:setTip(tipId: string)
+		self.tipId = tipId
 	end
 
 	--[=[
@@ -184,14 +194,29 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 			then self.targetEditableImage:ReadPixelsBuffer(rectPosition, rectSize)
 			else nil
 
-		TextureUtils.drawCircleBetweenPoints(
-			self.lastPenPosition,
-			newPosition,
-			self.penSize,
-			self.penColor,
-			self.penTransparency,
-			self.targetEditableImage
-		)
+		if self.penTransparency >= 1 then
+			TextureUtils.drawCircleBetweenPoints(
+				self.lastPenPosition,
+				newPosition,
+				self.penSize,
+				self.penColor,
+				self.penTransparency,
+				self.targetEditableImage
+			)
+		else
+			if not self.stamp then
+				self.stamp = TextureUtils.createLinearStamp(self.penSize, self.penColor, self.tipId)
+			end
+
+			TextureUtils.stampBetweenPoints(
+				self.lastPenPosition,
+				newPosition,
+				self.penSize,
+				self.tipId,
+				self.stamp :: EditableImage,
+				self.targetEditableImage
+			)
+		end
 
 		if prevBrushBuffer then
 			TextureUtils.performRegionStencil(
@@ -201,10 +226,6 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 				rectPosition,
 				rectSize
 			)
-		end
-
-		if self.textureInfo.usesLayerDecals then
-			EdgeBleed.bleedRect(self.targetEditableImage, rectPosition, rectSize)
 		end
 
 		self.drawPositions[#self.drawPositions + 1] = newPosition
@@ -266,6 +287,7 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 			brushSize = self.penSize,
 			brushColor = self.penColor,
 			brushTransparency = self.penTransparency,
+			tipId = self.tipId,
 			drawPositions = self.drawPositions,
 		}
 
@@ -275,7 +297,12 @@ local function LinearBrush(targetEditableImage: EditableImage, textureInfo: Text
 		commitBrushStrokeCallback(linearActionMetadata)
 	end
 
-	function object:destroy() end
+	function object:destroy()
+		if self.stamp then
+			self.stamp:Destroy()
+			self.stamp = nil
+		end
+	end
 
 	return object
 end

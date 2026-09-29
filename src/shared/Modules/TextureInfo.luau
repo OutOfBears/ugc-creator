@@ -2,10 +2,10 @@ local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+local AtlasUtil = require("./Utils/AtlasUtil")
 local Blanks = require(ReplicatedStorage.Shared.Data.Blanks)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
-local EdgeBleed = require("./Utils/EdgeBleed")
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local RegionMaps = require(ReplicatedStorage.Shared.Data.RegionMaps)
 
@@ -67,13 +67,12 @@ export type TextureInfo = {
 	modelTextureInfo: ModelTextureInfo,
 	lastCreatedEditableImage: EditableImage?,
 	lastCreatedEditableImageTextureId: string?,
+	stickerImage: EditableImage?,
+	stickerImageKey: string?,
 	memorySafeEditableImage: EditableImage?,
-	usesLayerDecals: boolean,
 	paintLayers: { PaintLayer },
 	stickerPaintLayers: { [string]: string },
 	blendScratchImages: { [string]: EditableImage },
-	mergedPreviewImages: { [LayerInfo]: EditableImage },
-	paintPreviewChanged: BindableEvent,
 	-- methods
 	getMemorySafeEditableImage: (self: TextureInfo, textureId: string?, size: Vector2?) -> EditableImage,
 	hasRegion: (self: TextureInfo, regionName: string) -> boolean,
@@ -86,13 +85,14 @@ export type TextureInfo = {
 	getNormalMap: (self: TextureInfo, meshPart: MeshPart) -> EditableImage,
 	getBaseLayer: (self: TextureInfo, meshPart: MeshPart) -> EditableImage,
 	getTextureSize: (self: TextureInfo, meshPart: MeshPart) -> Vector2,
+	getImageSize: (self: TextureInfo, meshPart: MeshPart) -> Vector2,
 	getOrCreateLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> (EditableImage, boolean),
 	removeLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> (),
 	hasLayer: (self: TextureInfo, meshPart: MeshPart, layerName: string) -> boolean,
 	updateOutputColorMap: (self: TextureInfo, meshPart: MeshPart) -> (),
 	flushOutputColorMap: (self: TextureInfo, meshPart: MeshPart) -> (),
-	getPaintPreviewImages: (self: TextureInfo, meshPart: MeshPart) -> { EditableImage },
-	scheduleEdgeBleed: (self: TextureInfo, image: EditableImage) -> (),
+	getAtlasSlotRect: (self: TextureInfo, meshPart: MeshPart, atlasSlot: number) -> (Vector2, Vector2),
+	clearAtlasSlot: (self: TextureInfo, meshPart: MeshPart, atlasSlot: number) -> (),
 	getPaintLayers: (self: TextureInfo) -> { PaintLayer },
 	getPaintLayer: (self: TextureInfo, layerId: string) -> PaintLayer?,
 	getPaintLayerIndex: (self: TextureInfo, layerId: string) -> number?,
@@ -107,6 +107,7 @@ export type TextureInfo = {
 	getOriginalTextureId: (self: TextureInfo, meshPart: MeshPart) -> string,
 	getOutputTextureByName: (self: TextureInfo, meshPartName: string) -> EditableImage?,
 	getOrCreateEditableImageByTextureId: (self: TextureInfo, textureId: string) -> EditableImage,
+	getStickerImage: (self: TextureInfo, textureId: string, pixelSize: number) -> EditableImage,
 	meshPartsShareLayer: (self: TextureInfo, meshPart1: MeshPart, meshPart2: MeshPart) -> boolean,
 	destroy: (self: TextureInfo) -> (),
 }
@@ -124,22 +125,13 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 	object.creationType = blankData.creationType
 	object.individualPartsNames = blankData.individualPartsNames
-	object.enableKitbashing = blankData.enableKitbashing
+	local atlasLayout = Blanks.getAtlasLayout(blankData)
+	object.enableKitbashing = atlasLayout ~= nil
 
-	-- A layer-catalog blank shows its paint as decals over the layer decals and composes the final
-	-- texture later, so its paint layers stay transparent and no SurfaceAppearance is bound.
-	local usesLayerDecals = blankData.layerCatalogName ~= nil
+	local atlasCellSize = if atlasLayout
+		then select(2, AtlasUtil.toPixels(atlasLayout.base, resolution))
+		else resolution
 
-	local pendingEdgeBleeds: { [EditableImage]: thread } = {}
-	local function cancelEdgeBleed(image: EditableImage)
-		local pending = pendingEdgeBleeds[image]
-		if pending then
-			task.cancel(pending)
-			pendingEdgeBleeds[image] = nil
-		end
-	end
-
-	local staleOutputs: { [LayerInfo]: boolean } = {}
 	local pendingFrameUpdates: { [LayerInfo]: boolean } = {}
 	local frameUpdateConnection: RBXScriptConnection? = nil
 
@@ -206,7 +198,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 		outputImage:DrawImage(Vector2.zero, source, (Enum.ImageCombineType :: any)[blendMode])
 
-		if blendMode == modes.subtract and not usesLayerDecals then
+		if blendMode == modes.subtract then
 			outputImage:DrawRectangle(Vector2.zero, outputImage.Size, Color3.new(0, 0, 0), 0, Enum.ImageCombineType.Add)
 		end
 	end
@@ -217,8 +209,8 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		return string.sub(layerName, 1, #prefix) == prefix
 	end
 
-	local function doMergeDownLayers(layerInfo: LayerInfo, targetImage: EditableImage?, lastPaintLayerIndex: number?)
-		local outputImage = targetImage or layerInfo.outputEditableImage
+	local function doMergeDownLayers(layerInfo: LayerInfo)
+		local outputImage = layerInfo.outputEditableImage
 
 		for i, layer: SingleLayer in layerInfo.inputLayers do
 			if i == 1 then
@@ -228,11 +220,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			end
 		end
 
-		for i, paintLayer in object.paintLayers do
-			if lastPaintLayerIndex and i > lastPaintLayerIndex then
-				break
-			end
-
+		for _, paintLayer in object.paintLayers do
 			if not paintLayer.visible then
 				continue
 			end
@@ -244,49 +232,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		end
 	end
 
-	-- Decals can only alpha-blend, so everything up to the topmost blended layer is shown as one
-	-- merged image, and only the Normal layers above it are shown directly.
-	local function getTopBlendedPaintLayerIndex(): number
-		for i = #object.paintLayers, 1, -1 do
-			local paintLayer = object.paintLayers[i]
-			if paintLayer.visible and paintLayer.blendMode ~= CreationConfig.paintBlendModes.normal then
-				return i
-			end
-		end
-
-		return 0
-	end
-
-	local function getMergedPreviewImage(layerInfo: LayerInfo): EditableImage?
-		local image = object.mergedPreviewImages[layerInfo]
-		if not image then
-			image = AssetService:CreateEditableImage({ Size = layerInfo.outputEditableImage.Size })
-			if not image then
-				return nil
-			end
-			object.mergedPreviewImages[layerInfo] = image
-		end
-
-		return image
-	end
-
-	local function refreshPaintPreview(layerInfo: LayerInfo)
-		local topBlendedIndex = getTopBlendedPaintLayerIndex()
-		if topBlendedIndex == 0 then
-			return
-		end
-
-		local mergedImage = getMergedPreviewImage(layerInfo)
-		if mergedImage then
-			doMergeDownLayers(layerInfo, mergedImage, topBlendedIndex)
-			object:scheduleEdgeBleed(mergedImage)
-		else
-			doMergeDownLayers(layerInfo)
-			staleOutputs[layerInfo] = nil
-			object:scheduleEdgeBleed(layerInfo.outputEditableImage)
-		end
-	end
-
 	local function runFrameUpdates()
 		frameUpdateConnection = nil
 
@@ -294,11 +239,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		table.clear(pendingFrameUpdates)
 
 		for layerInfo in layerInfos do
-			if usesLayerDecals then
-				refreshPaintPreview(layerInfo)
-			else
-				doMergeDownLayers(layerInfo)
-			end
+			doMergeDownLayers(layerInfo)
 		end
 	end
 
@@ -326,11 +267,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			scratch:Destroy()
 		end
 		table.clear(object.blendScratchImages)
-
-		for _, mergedImage in object.mergedPreviewImages do
-			mergedImage:Destroy()
-		end
-		table.clear(object.mergedPreviewImages)
 
 		maid:doCleaning()
 	end
@@ -361,13 +297,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			throwMemoryError()
 		end
 
-		local targetSize = resolution
-		if accommodateKitbash then
-			targetSize = Vector2.new(
-				math.floor(targetSize.X / CreationConfig.atlasGridSize),
-				math.floor(targetSize.Y / CreationConfig.atlasGridSize)
-			)
-		end
+		local targetSize = if accommodateKitbash then atlasCellSize else resolution
 
 		if originalImage.Size.X == targetSize.X and originalImage.Size.Y == targetSize.Y then
 			return originalImage
@@ -386,9 +316,10 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			scale = originalImage.Size.Y / targetSize.Y
 		end
 
+		-- An atlas cell is filled edge to edge because the part's UVs span it, even when it isn't square.
 		scaledImage:DrawImageTransformed(
 			Vector2.new(scaledImage.Size.X / 2, scaledImage.Size.Y / 2),
-			Vector2.new(1 / scale, 1 / scale),
+			if accommodateKitbash then targetSize / originalImage.Size else Vector2.new(1 / scale, 1 / scale),
 			0,
 			originalImage,
 			-- Region masks must stay pixelated through a rescale or the color-to-region mapping breaks.
@@ -426,15 +357,13 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 			if hasBaseTexture and textureIdToLayerMap[descendant.TextureID] then
 				newModelInfo[descendant] = textureIdToLayerMap[descendant.TextureID]
-				if not usesLayerDecals then
-					local sharedSurfaceAppearance = AssetService:CreateSurfaceAppearanceAsync({
-						ColorMap = Content.fromObject(textureIdToLayerMap[descendant.TextureID].outputEditableImage),
-						MetalnessMap = Content.fromObject(textureIdToLayerMap[descendant.TextureID].metalnessEI),
-						RoughnessMap = Content.fromObject(textureIdToLayerMap[descendant.TextureID].roughnessEI),
-						NormalMap = Content.fromObject(textureIdToLayerMap[descendant.TextureID].normalEI),
-					})
-					sharedSurfaceAppearance.Parent = descendant
-				end
+				local sharedSurfaceAppearance = AssetService:CreateSurfaceAppearanceAsync({
+					ColorMap = Content.fromObject(textureIdToLayerMap[descendant.TextureID].outputEditableImage),
+					MetalnessMap = Content.fromObject(textureIdToLayerMap[descendant.TextureID].metalnessEI),
+					RoughnessMap = Content.fromObject(textureIdToLayerMap[descendant.TextureID].roughnessEI),
+					NormalMap = Content.fromObject(textureIdToLayerMap[descendant.TextureID].normalEI),
+				})
+				sharedSurfaceAppearance.Parent = descendant
 
 				continue
 			end
@@ -447,13 +376,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			if hasBaseTexture then
 				baseTexture = createScaledEditableImage(Content.fromUri(descendant.TextureID), accommodateKitbash)
 			else
-				local blankSize = resolution
-				if accommodateKitbash then
-					blankSize = Vector2.new(
-						math.floor(resolution.X / CreationConfig.atlasGridSize),
-						math.floor(resolution.Y / CreationConfig.atlasGridSize)
-					)
-				end
+				local blankSize = if accommodateKitbash then atlasCellSize else resolution
 				baseTexture = AssetService:CreateEditableImage({ Size = blankSize })
 			end
 			if not baseTexture then
@@ -466,14 +389,11 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			}
 			local originalTextureSize = baseTexture.Size
 
-			-- The kitbash atlas is a 2x2 grid whose top-left cell holds the creation's own texture;
-			-- the remaining cells are reserved for the textures of attached kitbash pieces.
+			-- The creation's own texture sits in the atlas layout's base cell at the top-left; the
+			-- layout's slots are reserved for the textures of attached pieces.
 			local fullTextureSize = originalTextureSize
 			if accommodateKitbash then
-				fullTextureSize = Vector2.new(
-					originalTextureSize.X * CreationConfig.atlasGridSize,
-					originalTextureSize.Y * CreationConfig.atlasGridSize
-				)
+				fullTextureSize = resolution
 				local kitbashAtlas = AssetService:CreateEditableImage({
 					Size = fullTextureSize,
 				})
@@ -483,15 +403,13 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 				maid:giveTask(kitbashAtlas)
 
 				-- Fill canvas so there are no transparent pixels in SurfaceAppearance maps
-				if not usesLayerDecals then
-					kitbashAtlas:DrawRectangle(
-						Vector2.new(0, 0),
-						fullTextureSize,
-						Color3.fromRGB(255, 255, 255),
-						0,
-						Enum.ImageCombineType.Overwrite
-					)
-				end
+				kitbashAtlas:DrawRectangle(
+					Vector2.new(0, 0),
+					fullTextureSize,
+					Color3.fromRGB(255, 255, 255),
+					0,
+					Enum.ImageCombineType.Overwrite
+				)
 				kitbashAtlas:DrawImage(Vector2.new(0, 0), baseTexture, Enum.ImageCombineType.BlendSourceOver)
 
 				baseTextureLayer.editableImage = kitbashAtlas
@@ -511,15 +429,13 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 				maid:giveTask(newBaseTexture)
 
 				-- Fill canvas so there are no transparent pixels in SurfaceAppearance maps
-				if not usesLayerDecals then
-					newBaseTexture:DrawRectangle(
-						Vector2.new(0, 0),
-						fullTextureSize,
-						Color3.fromRGB(255, 255, 255),
-						0,
-						Enum.ImageCombineType.Overwrite
-					)
-				end
+				newBaseTexture:DrawRectangle(
+					Vector2.new(0, 0),
+					fullTextureSize,
+					Color3.fromRGB(255, 255, 255),
+					0,
+					Enum.ImageCombineType.Overwrite
+				)
 				newBaseTexture:DrawImage(Vector2.new(0, 0), baseTexture, Enum.ImageCombineType.BlendSourceOver)
 				baseTextureLayer.editableImage = newBaseTexture
 				baseTexture:Destroy()
@@ -584,15 +500,13 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 			doMergeDownLayers(newLayerInfo)
 
-			if not usesLayerDecals then
-				local surfaceAppearance = AssetService:CreateSurfaceAppearanceAsync({
-					ColorMap = Content.fromObject(outputTexture),
-					MetalnessMap = Content.fromObject(metalnessEI),
-					RoughnessMap = Content.fromObject(roughnessEI),
-					NormalMap = Content.fromObject(normalEI),
-				})
-				surfaceAppearance.Parent = descendant
-			end
+			local surfaceAppearance = AssetService:CreateSurfaceAppearanceAsync({
+				ColorMap = Content.fromObject(outputTexture),
+				MetalnessMap = Content.fromObject(metalnessEI),
+				RoughnessMap = Content.fromObject(roughnessEI),
+				NormalMap = Content.fromObject(normalEI),
+			})
+			surfaceAppearance.Parent = descendant
 
 			newModelInfo[descendant] = newLayerInfo
 		end
@@ -859,22 +773,41 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		@param meshPart MeshPart -- the part to look up
 		@return Vector2 -- the drawable size for that part
 
-		For an accessory with a kitbash atlas this is the atlas cell, not the whole image, so
-		brushes stay inside the creation's own slot.
+		For a creation with an atlas this is its own base cell, not the whole image, so brushes stay
+		inside the creation's own slot.
 	]=]
 	function object:getTextureSize(meshPart: MeshPart): Vector2
 		local layerInfo = self.modelTextureInfo[meshPart]
 
 		local fullTextureSize = layerInfo.outputEditableImage.Size
 
-		if layerInfo.kitbashAtlasInfo then
-			return Vector2.new(
-				math.floor(fullTextureSize.X / CreationConfig.atlasGridSize),
-				math.floor(fullTextureSize.Y / CreationConfig.atlasGridSize)
-			)
+		if atlasLayout and layerInfo.kitbashAtlasInfo then
+			return select(2, AtlasUtil.toPixels(atlasLayout.base, fullTextureSize))
 		end
 
 		return fullTextureSize
+	end
+
+	--[=[
+		@within TextureInfo
+		@param meshPart MeshPart -- the part to look up
+		@return Vector2 -- the size of the part's whole color map, atlas included, which its UVs span
+	]=]
+	function object:getImageSize(meshPart: MeshPart): Vector2
+		return self.modelTextureInfo[meshPart].outputEditableImage.Size
+	end
+
+	--[=[
+		@within TextureInfo
+		@param meshPart MeshPart -- the part to look up
+		@param atlasSlot number -- index into the blank's atlas layout slots
+		@return Vector2 -- the slot's top-left pixel
+		@return Vector2 -- the slot's size in pixels
+	]=]
+	function object:getAtlasSlotRect(meshPart: MeshPart, atlasSlot: number): (Vector2, Vector2)
+		local layout = assert(atlasLayout, "This creation has no texture atlas")
+
+		return AtlasUtil.toPixels(layout.slots[atlasSlot], self.modelTextureInfo[meshPart].outputEditableImage.Size)
 	end
 
 	--[=[
@@ -899,7 +832,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		else
 			newLayer = self.reservedStickerEditableImageMap[layerName]
 			if newLayer.Size ~= layerInfo.outputEditableImage.Size then
-				cancelEdgeBleed(newLayer)
 				newLayer:Destroy()
 				newLayer = AssetService:CreateEditableImage({ Size = layerInfo.outputEditableImage.Size })
 				assert(newLayer, "Budget should be sufficient to create sticker layer")
@@ -912,7 +844,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			name = layerName,
 			editableImage = newLayer,
 		})
-		self.paintPreviewChanged:Fire()
 
 		return newLayer, true
 	end
@@ -928,7 +859,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		for i, layer in layerInfo.inputLayers do
 			if layer.name == layerName then
 				table.remove(layerInfo.inputLayers, i)
-				self.paintPreviewChanged:Fire()
 				break
 			end
 		end
@@ -961,9 +891,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		@param meshPart MeshPart -- the part whose color map to rebuild
 
 		Merges the part's input layers back down into the output image the SurfaceAppearance reads.
-		The server merges immediately. The client merges at most once per frame, and on a
-		layer-catalog blank only refreshes the paint preview, leaving the output stale until
-		[TextureInfo:flushOutputColorMap].
+		The server merges immediately; the client merges at most once per frame.
 	]=]
 	function object:updateOutputColorMap(meshPart: MeshPart)
 		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
@@ -973,9 +901,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			return
 		end
 
-		if usesLayerDecals then
-			staleOutputs[layerInfo] = true
-		end
 		scheduleFrameUpdate(layerInfo)
 	end
 
@@ -987,84 +912,33 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	]=]
 	function object:flushOutputColorMap(meshPart: MeshPart)
 		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
-		if not staleOutputs[layerInfo] and not (pendingFrameUpdates[layerInfo] and not usesLayerDecals) then
+		if not pendingFrameUpdates[layerInfo] then
 			return
 		end
 
-		staleOutputs[layerInfo] = nil
-		if not usesLayerDecals then
-			pendingFrameUpdates[layerInfo] = nil
-		end
-
+		pendingFrameUpdates[layerInfo] = nil
 		doMergeDownLayers(layerInfo)
-
-		if usesLayerDecals then
-			cancelEdgeBleed(layerInfo.outputEditableImage)
-			EdgeBleed.bleed(layerInfo.outputEditableImage)
-		end
 	end
 
 	--[=[
 		@within TextureInfo
-		@param meshPart MeshPart -- the part whose layer stack to show
-		@return { EditableImage } -- images to stack bottom to top, e.g. one decal each
+		@param meshPart MeshPart -- the part whose layer stack to touch
+		@param atlasSlot number -- index into the blank's atlas layout slots
 
-		The live preview of a layer-catalog blank's paint. Normal layers above the topmost blended
-		layer are their own images, so painting them needs no merge; everything up to that blended
-		layer is one merged image, refreshed once per frame.
+		Erases one kitbash atlas cell from every paint layer, e.g. when the piece or accessory textured
+		by that cell is removed or swapped. Call [TextureInfo:updateOutputColorMap] afterwards.
 	]=]
-	function object:getPaintPreviewImages(meshPart: MeshPart): { EditableImage }
-		local layerInfo: LayerInfo = self.modelTextureInfo[meshPart]
-		local images = {}
-		if not layerInfo then
-			return images
-		end
+	function object:clearAtlasSlot(meshPart: MeshPart, atlasSlot: number)
+		local position, size = self:getAtlasSlotRect(meshPart, atlasSlot)
 
-		local topBlendedIndex = getTopBlendedPaintLayerIndex()
-		if topBlendedIndex > 0 then
-			local mergedImage = getMergedPreviewImage(layerInfo)
-			if not mergedImage then
-				return { layerInfo.outputEditableImage }
-			end
-			table.insert(images, mergedImage)
-		else
-			for _, layer in layerInfo.inputLayers do
-				if not isStickerLayerName(layer.name) then
-					table.insert(images, layer.editableImage)
-				end
-			end
-		end
-
-		for i, paintLayer in self.paintLayers do
-			if i <= topBlendedIndex or not paintLayer.visible then
+		for _, paintLayer in self.paintLayers do
+			local paintImage = self:getPaintLayerImage(meshPart, paintLayer.id)
+			if not paintImage then
 				continue
 			end
 
-			for _, image in getPaintLayerGroup(layerInfo, paintLayer) do
-				table.insert(images, image)
-			end
+			paintImage:DrawRectangle(position, size, Color3.new(0, 0, 0), 1, Enum.ImageCombineType.Overwrite)
 		end
-
-		return images
-	end
-
-	--[=[
-		@within TextureInfo
-		@param image EditableImage -- a paint preview image that was just edited
-
-		Bleeds paint color into the image's transparent edges once edits pause, so a scaled-down
-		decal shows no dark outline. Only layer-catalog blanks on the client need it.
-	]=]
-	function object:scheduleEdgeBleed(image: EditableImage)
-		if not usesLayerDecals or not RunService:IsClient() then
-			return
-		end
-
-		cancelEdgeBleed(image)
-		pendingEdgeBleeds[image] = task.delay(CreationConfig.paintEdgeBleedDelay, function()
-			pendingEdgeBleeds[image] = nil
-			EdgeBleed.bleed(image)
-		end)
 	end
 
 	--[=[
@@ -1145,7 +1019,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			blendMode = CreationConfig.paintBlendModes.normal,
 			visible = true,
 		})
-		self.paintPreviewChanged:Fire()
 
 		return true
 	end
@@ -1166,12 +1039,10 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		for _, layerInfo in self:getUniqueLayerMap() do
 			local image = layerInfo.paintImages[layerId]
 			if image then
-				cancelEdgeBleed(image)
 				image:Destroy()
 				layerInfo.paintImages[layerId] = nil
 			end
 		end
-		self.paintPreviewChanged:Fire()
 	end
 
 	--[=[
@@ -1187,7 +1058,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 		local paintLayer = table.remove(self.paintLayers, index)
 		table.insert(self.paintLayers, math.clamp(toIndex, 1, #self.paintLayers + 1), paintLayer)
-		self.paintPreviewChanged:Fire()
 	end
 
 	--[=[
@@ -1199,7 +1069,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		local paintLayer = self:getPaintLayer(layerId)
 		if paintLayer then
 			paintLayer.blendMode = blendMode
-			self.paintPreviewChanged:Fire()
 		end
 	end
 
@@ -1212,7 +1081,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		local paintLayer = self:getPaintLayer(layerId)
 		if paintLayer then
 			paintLayer.visible = visible
-			self.paintPreviewChanged:Fire()
 		end
 	end
 
@@ -1222,10 +1090,7 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		@param layerId string? -- the paint layer that owns it, or nil to clear
 	]=]
 	function object:setStickerPaintLayer(stickerLayerName: string, layerId: string?)
-		if self.stickerPaintLayers[stickerLayerName] ~= layerId then
-			self.stickerPaintLayers[stickerLayerName] = layerId
-			self.paintPreviewChanged:Fire()
-		end
+		self.stickerPaintLayers[stickerLayerName] = layerId
 	end
 
 	--[=[
@@ -1301,6 +1166,66 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 
 	--[=[
 		@within TextureInfo
+		@param textureId string -- the sticker texture
+		@param pixelSize number -- the size the sticker lands at on the layer, along its longer side
+		@return EditableImage -- the sticker resampled to that size, or the source image when it already is
+
+		Drawing and projecting don't filter a big shrink, so a sticker drawn much smaller than its
+		source aliases. It is halved step by step with bilinear filtering instead, which averages
+		the texels it drops. Only the latest size is kept, so resizing a sticker re-resamples it.
+	]=]
+	function object:getStickerImage(textureId: string, pixelSize: number): EditableImage
+		local source = self:getOrCreateEditableImageByTextureId(textureId)
+		local sourceSide = math.max(source.Size.X, source.Size.Y)
+		local side = math.clamp(math.round(pixelSize), CreationConfig.minStickerPixelSize, sourceSide)
+		if side == sourceSide then
+			return source
+		end
+
+		local key = `{textureId}:{side}`
+		if self.stickerImageKey == key and self.stickerImage then
+			return self.stickerImage
+		end
+
+		if self.stickerImage then
+			self.stickerImage:Destroy()
+			self.stickerImage = nil
+		end
+
+		local targetSize = Vector2.new(
+			math.max(math.round(source.Size.X * side / sourceSide), 1),
+			math.max(math.round(source.Size.Y * side / sourceSide), 1)
+		)
+
+		local current = source
+		repeat
+			local nextSize = Vector2.new(
+				math.max(targetSize.X, math.ceil(current.Size.X / 2)),
+				math.max(targetSize.Y, math.ceil(current.Size.Y / 2))
+			)
+			local resampled = AssetService:CreateEditableImage({ Size = nextSize })
+			if not resampled then
+				throwMemoryError()
+			end
+
+			resampled:DrawImageTransformed(nextSize / 2, nextSize / current.Size, 0, current, {
+				CombineType = Enum.ImageCombineType.Overwrite,
+			})
+
+			if current ~= source then
+				current:Destroy()
+			end
+			current = resampled
+		until current.Size == targetSize
+
+		self.stickerImage = current
+		self.stickerImageKey = key
+
+		return current
+	end
+
+	--[=[
+		@within TextureInfo
 		@param meshPart1 MeshPart -- the first part
 		@param meshPart2 MeshPart -- the second part
 		@return boolean -- true if both parts draw onto the same layer stack
@@ -1313,11 +1238,6 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 	end
 
 	function object:destroy()
-		for _, pending in pendingEdgeBleeds do
-			task.cancel(pending)
-		end
-		table.clear(pendingEdgeBleeds)
-
 		if frameUpdateConnection then
 			frameUpdateConnection:Disconnect()
 			frameUpdateConnection = nil
@@ -1342,6 +1262,9 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 		if self.lastCreatedEditableImage then
 			self.lastCreatedEditableImage:Destroy()
 		end
+		if self.stickerImage then
+			self.stickerImage:Destroy()
+		end
 		for _, reservedStickerEI in pairs(self.reservedStickerEditableImageMap) do
 			reservedStickerEI:Destroy()
 		end
@@ -1356,11 +1279,8 @@ local function TextureInfo(model: Model, blankData: Blanks.Blank, resolution: Ve
 			visible = true,
 		},
 	}
-	object.usesLayerDecals = usesLayerDecals
 	object.stickerPaintLayers = {}
 	object.blendScratchImages = {}
-	object.mergedPreviewImages = {}
-	object.paintPreviewChanged = maid:add(Instance.new("BindableEvent"))
 
 	object.regionMap = setupRegionMap()
 	object.perMeshPartRegionMap = setupMeshPartToRegionMap(blankData.regionMapIndividual or {})

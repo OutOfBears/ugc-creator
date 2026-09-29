@@ -51,7 +51,6 @@ export type StickerTool = {
 	-- vars
 	modelInfo: ModelInfo.ModelInfo,
 	isAccessory: boolean,
-	enableKitbashing: boolean,
 	inputManager: CreationInput.CreationInput,
 	currentlySelectedSticker: number,
 	isDragging: boolean,
@@ -205,7 +204,6 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 	object.modelInfo = modelInfo
 	object.isAccessory = modelInfo:getCreationType() == CreationConfig.creationTypes.accessory
-	object.enableKitbashing = modelInfo:getKitbashingEnabled()
 	object.inputManager = inputManager
 
 	object.currentlySelectedSticker = 0
@@ -444,14 +442,9 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 			raycastResult.triangleId,
 			raycastResult.barycentricCoordinate
 		)
-		if self.enableKitbashing then
-			-- The kitbash atlas halves every UV.
-			uvCoord *= CreationConfig.atlasGridSize
-		end
-
 		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 
-		local textureCoord = uvCoord * textureInfo:getTextureSize(meshPart)
+		local textureCoord = uvCoord * textureInfo:getImageSize(meshPart)
 		selectedSticker.texturePosition = textureCoord
 		self:refreshHandleUI()
 		self:redrawSticker(selectedSticker, false)
@@ -662,11 +655,6 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 		uvCoord = (baryCoord.x * editableMesh:GetUV(faceUVs[1]))
 			+ (baryCoord.y * editableMesh:GetUV(faceUVs[2]))
 			+ (baryCoord.z * editableMesh:GetUV(faceUVs[3]))
-		if self.enableKitbashing then
-			-- The kitbash atlas halves every UV.
-			uvCoord *= CreationConfig.atlasGridSize
-		end
-
 		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 
 		local marker = createPositionMarker(newCFrame)
@@ -675,7 +663,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 			textureId = imageAssetId,
 			projectionDirection = workspace.CurrentCamera.CFrame.LookVector,
 
-			texturePosition = uvCoord * textureInfo:getTextureSize(meshPart),
+			texturePosition = uvCoord * textureInfo:getImageSize(meshPart),
 			rotation = 0,
 			scale = if self.isAccessory then CreationConfig.accessoryStickerScale else 1,
 
@@ -830,10 +818,6 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 			local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
 			textureInfo:updateOutputColorMap(stickerData.targetMeshPart)
 		end
-
-		local textureInfo: TextureInfo.TextureInfo = self.modelInfo:getTextureInfo()
-		local stickerLayerName = CreationConfig.layerNames.stickerPrefix .. stickerData.stickerLayerNumber
-		textureInfo:scheduleEdgeBleed(textureInfo.reservedStickerEditableImageMap[stickerLayerName])
 	end
 
 	--[=[

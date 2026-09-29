@@ -11,7 +11,6 @@ export type UVCanvasView = {
 	frame: Frame,
 	content: Frame,
 	backdrop: ImageLabel,
-	underlay: Frame,
 	textureStack: Frame,
 	textureImages: { ImageLabel },
 	cellSize: Vector2,
@@ -80,14 +79,6 @@ local function UVCanvasView(): UVCanvasView
 		Interactable = false,
 	}) :: ImageLabel
 
-	object.underlay = Create("Frame", {
-		Name = "Underlay",
-		BackgroundTransparency = 1,
-		Size = UDim2.fromScale(1, 1),
-		ZIndex = 1,
-		Interactable = false,
-	}) :: Frame
-
 	object.textureStack = Create("Frame", {
 		Name = "Texture",
 		BackgroundTransparency = 1,
@@ -119,7 +110,6 @@ local function UVCanvasView(): UVCanvasView
 		ZIndex = 1,
 		Children = {
 			object.backdrop,
-			object.underlay,
 			object.textureStack,
 			object.wireframeImage,
 			object.handleParent,
@@ -148,6 +138,12 @@ local function UVCanvasView(): UVCanvasView
 		return math.min(viewportSize.X / object.textureSize.X, viewportSize.Y / object.textureSize.Y)
 	end
 
+	local function getTextureResampleMode(): Enum.ResamplerMode
+		return if getBaseScale() * object.zoom >= config.pixelatedDisplayScale
+			then Enum.ResamplerMode.Pixelated
+			else Enum.ResamplerMode.Default
+	end
+
 	--[=[
 		@within UVCanvasView
 		@private
@@ -159,6 +155,10 @@ local function UVCanvasView(): UVCanvasView
 
 		self.content.Size = UDim2.fromOffset(contentSize.X, contentSize.Y)
 		self.content.Position = UDim2.fromOffset(self.pan.X, self.pan.Y)
+
+		for _, label in self.textureImages do
+			label.ResampleMode = getTextureResampleMode()
+		end
 	end
 
 	--[=[
@@ -180,7 +180,7 @@ local function UVCanvasView(): UVCanvasView
 					Name = `Texture{index}`,
 					BackgroundTransparency = 1,
 					Size = UDim2.fromScale(1, 1),
-					ResampleMode = Enum.ResamplerMode.Pixelated,
+					ResampleMode = getTextureResampleMode(),
 					ZIndex = index,
 					Interactable = false,
 					Parent = self.textureStack,

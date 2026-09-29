@@ -113,6 +113,12 @@ local function checkMirrorWidget(
 	end
 end
 
+local function getSlotRect(modelInfo: ModelInfo.ModelInfo, atlasSlot: number?): CreationConfig.AtlasRect?
+	local atlasLayout = modelInfo:getAtlasLayout()
+
+	return if atlasLayout and atlasSlot then atlasLayout.slots[atlasSlot] else nil
+end
+
 --[=[
 	@within MeshEditActions
 	@prop UpdateWidgetPositionAction ActionProcessor<UpdateWidgetPositionActionMetadata>
@@ -200,7 +206,7 @@ local MergeKitbashPieceAction: ActionProcessor<MergeKitbashPieceActionMetadata> 
 			scale = actionMetaData.scale,
 			rotation = actionMetaData.rotation,
 			baseTextureLayer = baseTextureLayer,
-			atlasSlot = actionMetaData.atlasSlot,
+			slotRect = getSlotRect(modelInfo, actionMetaData.atlasSlot),
 			hasDrawnToAtlas = actionMetaData.hasDrawnToAtlas,
 		})
 
@@ -244,32 +250,9 @@ local UnmergeKitbashPieceAction: ActionProcessor<UnmergeKitbashPieceActionMetada
 		end
 		targetEditableMesh:RemoveUnused()
 
-		if actionMetaData.atlasSlot then
+		if getSlotRect(modelInfo, actionMetaData.atlasSlot) then
 			local textureInfo = modelInfo:getTextureInfo()
-
-			for _, paintLayer in textureInfo:getPaintLayers() do
-				local paintImage = textureInfo:getPaintLayerImage(targetMeshPart, paintLayer.id)
-				if not paintImage then
-					continue
-				end
-
-				local atlasSize = paintImage.Size
-				local slotInfo = CreationConfig.atlasSlots[actionMetaData.atlasSlot]
-				local slotScale = 1.0 / CreationConfig.atlasGridSize
-				local slotWidth = atlasSize.X * slotScale
-				local slotHeight = atlasSize.Y * slotScale
-				local slotX = atlasSize.X * slotInfo.uOffset
-				local slotY = atlasSize.Y * slotInfo.vOffset
-
-				paintImage:DrawRectangle(
-					Vector2.new(slotX, slotY),
-					Vector2.new(slotWidth, slotHeight),
-					Color3.new(0, 0, 0),
-					1,
-					Enum.ImageCombineType.Overwrite
-				)
-			end
-
+			textureInfo:clearAtlasSlot(targetMeshPart, actionMetaData.atlasSlot)
 			textureInfo:updateOutputColorMap(targetMeshPart)
 		end
 	end,

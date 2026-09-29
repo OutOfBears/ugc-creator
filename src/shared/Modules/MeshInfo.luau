@@ -1,6 +1,7 @@
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AtlasUtil = require("./Utils/AtlasUtil")
 local Blanks = require(ReplicatedStorage.Shared.Data.Blanks)
 local Create = require("./Create")
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
@@ -184,13 +185,12 @@ local function setupBodyPart(meshPart: MeshPart, wrapTarget: WrapTarget): MeshPa
 	return partInfo
 end
 
-local function remapUVsForKitbashAtlas(editableMesh: EditableMesh)
-	local uvs = editableMesh:GetUVs()
-	for _, uvId in uvs do
-		local uvCoord = editableMesh:GetUV(uvId)
-		local remappedUV =
-			Vector2.new(uvCoord.X / CreationConfig.atlasGridSize, uvCoord.Y / CreationConfig.atlasGridSize)
-		editableMesh:SetUV(uvId, remappedUV)
+local function remapUVsForKitbashAtlas(editableMesh: EditableMesh, atlasLayout: CreationConfig.AtlasLayout)
+	for _, uvId in editableMesh:GetUVs() do
+		local uv = editableMesh:GetUV(uvId)
+		if uv then
+			editableMesh:SetUV(uvId, AtlasUtil.remapUV(uv, atlasLayout.base))
+		end
 	end
 end
 
@@ -208,9 +208,9 @@ local function applyEditableMesh(meshPart: MeshPart, editableMesh: EditableMesh)
 	newMeshPart:Destroy()
 end
 
-local function setupRigidMesh(meshPart: MeshPart, kitbashingEnabled: boolean?): MeshPartInfo
+local function setupRigidMesh(meshPart: MeshPart, atlasLayout: CreationConfig.AtlasLayout?): MeshPartInfo
 	local editableMesh = AssetService:CreateEditableMeshAsync(Content.fromUri(meshPart.MeshId), {
-		FixedSize = not kitbashingEnabled,
+		FixedSize = atlasLayout == nil,
 	})
 
 	-- The paint tools project in studs, so a mesh authored in other units (e.g. a centimetre
@@ -220,8 +220,8 @@ local function setupRigidMesh(meshPart: MeshPart, kitbashingEnabled: boolean?): 
 		editableMesh:SetPosition(vertexId, editableMesh:GetPosition(vertexId) / authoredScale)
 	end
 
-	if kitbashingEnabled then
-		remapUVsForKitbashAtlas(editableMesh)
+	if atlasLayout then
+		remapUVsForKitbashAtlas(editableMesh, atlasLayout)
 	end
 
 	applyEditableMesh(meshPart, editableMesh)
@@ -242,15 +242,15 @@ end
 local function setupLayeredClothingPart(
 	meshPart: MeshPart,
 	wrapLayer: WrapLayer,
-	kitbashingEnabled: boolean?
+	atlasLayout: CreationConfig.AtlasLayout?
 ): MeshPartInfo
 	local wrapDeformer = getWrapDeformer(meshPart)
 
 	local editableMesh = AssetService:CreateEditableMeshAsync(Content.fromUri(meshPart.MeshId), {
-		FixedSize = not kitbashingEnabled,
+		FixedSize = atlasLayout == nil,
 	})
-	if kitbashingEnabled then
-		remapUVsForKitbashAtlas(editableMesh)
+	if atlasLayout then
+		remapUVsForKitbashAtlas(editableMesh, atlasLayout)
 	end
 	applyEditableMesh(meshPart, editableMesh)
 
@@ -309,7 +309,7 @@ local function setupModelMeshes(
 	maid: Maid.Maid,
 	model: Model,
 	individualPartsNames: { [string]: boolean },
-	kitbashingEnabled: boolean?
+	atlasLayout: CreationConfig.AtlasLayout?
 ): ModelMeshInfo
 	local newModelInfo: ModelMeshInfo = {}
 
@@ -331,9 +331,9 @@ local function setupModelMeshes(
 		if wrapTarget then
 			newModelInfo[descendant] = setupBodyPart(descendant, wrapTarget)
 		elseif wrapLayer then
-			newModelInfo[descendant] = setupLayeredClothingPart(descendant, wrapLayer, kitbashingEnabled)
+			newModelInfo[descendant] = setupLayeredClothingPart(descendant, wrapLayer, atlasLayout)
 		else
-			newModelInfo[descendant] = setupRigidMesh(descendant, kitbashingEnabled)
+			newModelInfo[descendant] = setupRigidMesh(descendant, atlasLayout)
 		end
 
 		trackEditableMeshes(maid, newModelInfo[descendant])
@@ -717,7 +717,7 @@ local function MeshInfo(model: Model, blank: Blanks.Blank): MeshInfo
 	local object = {} :: MeshInfo
 
 	object.maid = maid
-	object.modelMeshInfo = setupModelMeshes(maid, model, blank.individualPartsNames, blank.enableKitbashing)
+	object.modelMeshInfo = setupModelMeshes(maid, model, blank.individualPartsNames, Blanks.getAtlasLayout(blank))
 	object.widgetInfo = buildWidgetInfo(model, blank.meshEditControlGroups, object.modelMeshInfo)
 
 	--[=[

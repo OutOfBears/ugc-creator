@@ -9,6 +9,8 @@
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AtlasUtil = require("../Utils/AtlasUtil")
+local BrushTips = require(ReplicatedStorage.Shared.Data.BrushTips)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
 local GeometryUtil = require("../Utils/GeometryUtil")
@@ -72,6 +74,7 @@ export type LinearBrushActionMetadata = {
 	brushSize: number,
 	brushColor: Color3,
 	brushTransparency: number,
+	tipId: string?,
 	drawPositions: { Vector2 },
 }
 
@@ -137,22 +140,25 @@ export type ProjectionBrushActionMetadata = {
 	drawPositions: { Vector2 },
 	isReflectiveMode: boolean?,
 	brushTransparency: number?,
+	tipId: string?,
 	intermediateEditableImageBuffer: buffer,
 	cachedTargetImageBuffer: buffer,
 }
 
 local ImageEditActions = {}
 
--- A kitbashable creation paints into the top-left cell of its atlas, not the whole image.
+-- An atlas creation paints into the top-left cell of its atlas, not the whole image.
 local function getSizeForTextureBuffer(modelInfo, colorMap: EditableImage): Vector2
-	if not modelInfo:getKitbashingEnabled() then
+	local atlasLayout = modelInfo:getAtlasLayout()
+	if not atlasLayout then
 		return colorMap.Size
 	end
 
-	return Vector2.new(
-		math.floor(colorMap.Size.X / CreationConfig.atlasGridSize),
-		math.floor(colorMap.Size.Y / CreationConfig.atlasGridSize)
-	)
+	return select(2, AtlasUtil.toPixels(atlasLayout.base, colorMap.Size))
+end
+
+local function isKnownTipId(tipId: any): boolean
+	return tipId == nil or (typeof(tipId) == "string" and BrushTips.tips[tipId] ~= nil)
 end
 
 local function getPaintLayerImage(modelInfo, meshPartName: string?, paintLayerId: any): EditableImage?
@@ -243,21 +249,40 @@ ImageEditActions.RecolorAction = {
 	@within ImageEditActions
 	@prop RecolorSectionAction ImageEditAction
 
-	Records the chosen color and opacity for one named layer section. The color is stored on the
-	model (compositing is done by LayerColorCompositor from this state), so this only validates and
-	saves — it draws nothing itself.
+	Records the chosen color and opacity for one named layer section, then rebakes the atlas cell that
+	section is drawn into. Accessory sections are keyed `"<slot>.<section>"`.
 ]=]
 ImageEditActions.RecolorSectionAction = {
-	isValidAction = function(modelInfo, actionMetaData: RecolorSectionActionMetadata)
-		if actionMetaData.color == nil or actionMetaData.sectionName == nil then
+	isValidAction = function(modelInfo: ModelInfo.ModelInfo, actionMetaData: RecolorSectionActionMetadata)
+		if typeof(actionMetaData.color) ~= "Color3" or typeof(actionMetaData.sectionName) ~= "string" then
+			return false
+		end
+		if actionMetaData.opacity ~= nil and typeof(actionMetaData.opacity) ~= "number" then
 			return false
 		end
 
-		return modelInfo:getLayerCatalog() ~= nil
+		local catalog, _, name = modelInfo:resolveColorKey(actionMetaData.sectionName)
+		if not catalog then
+			return false
+		end
+
+		if table.find(catalog.sortOrder, name) then
+			return true
+		end
+		for _, group in catalog.variantGroups do
+			if group.name == name then
+				return true
+			end
+		end
+
+		return false
 	end,
 	executeAction = function(modelInfo: ModelInfo.ModelInfo, actionMetaData: RecolorSectionActionMetadata)
 		local opacity = if actionMetaData.opacity ~= nil then actionMetaData.opacity else 1
 		modelInfo:saveSectionColor(actionMetaData.sectionName, actionMetaData.color, 1 - opacity)
+
+		local _, cell = modelInfo:resolveColorKey(actionMetaData.sectionName)
+		modelInfo:bakeLayerColors(cell)
 	end,
 }
 
@@ -265,23 +290,27 @@ ImageEditActions.RecolorSectionAction = {
 	@within ImageEditActions
 	@prop SelectVariantAction ImageEditAction
 
-	Records which option of a variant group (e.g. which mouth) is selected. Stored on the model for
-	LayerColorCompositor to read at bake time.
+	Records which option of a variant group (e.g. which mouth) is selected, then rebakes the cell
+	that group is drawn into. Accessory groups are keyed `"<slot>.<group>"`.
 ]=]
 ImageEditActions.SelectVariantAction = {
-	isValidAction = function(modelInfo, actionMetaData: SelectVariantActionMetadata)
-		if actionMetaData.groupName == nil or actionMetaData.optionIndex == nil then
+	isValidAction = function(modelInfo: ModelInfo.ModelInfo, actionMetaData: SelectVariantActionMetadata)
+		local optionIndex = actionMetaData.optionIndex
+		if typeof(actionMetaData.groupName) ~= "string" or typeof(optionIndex) ~= "number" then
+			return false
+		end
+		if optionIndex % 1 ~= 0 then
 			return false
 		end
 
-		local catalog = modelInfo:getLayerCatalog()
+		local catalog, _, name = modelInfo:resolveColorKey(actionMetaData.groupName)
 		if not catalog then
 			return false
 		end
 
 		for _, group in catalog.variantGroups do
-			if group.name == actionMetaData.groupName then
-				return actionMetaData.optionIndex >= 1 and actionMetaData.optionIndex <= #group.options
+			if group.name == name then
+				return optionIndex >= 1 and optionIndex <= #group.options
 			end
 		end
 
@@ -289,6 +318,9 @@ ImageEditActions.SelectVariantAction = {
 	end,
 	executeAction = function(modelInfo: ModelInfo.ModelInfo, actionMetaData: SelectVariantActionMetadata)
 		modelInfo:saveVariantSelection(actionMetaData.groupName, actionMetaData.optionIndex)
+
+		local _, cell = modelInfo:resolveColorKey(actionMetaData.groupName)
+		modelInfo:bakeLayerColors(cell)
 	end,
 }
 
@@ -503,7 +535,7 @@ ImageEditActions.LinearBrushAction = {
 			return false
 		end
 
-		return true
+		return isKnownTipId(actionMetaData.tipId)
 	end,
 	executeAction = function(modelInfo, actionMetaData: LinearBrushActionMetadata)
 		local textureInfo = modelInfo:getTextureInfo()
@@ -521,17 +553,41 @@ ImageEditActions.LinearBrushAction = {
 
 		local prevBrushBuffer = brushLayer:ReadPixelsBuffer(rectPosition, rectSize)
 
-		local prevDrawPosition = #actionMetaData.drawPositions > 0 and actionMetaData.drawPositions[1] or nil
-		for _, drawPosition in pairs(actionMetaData.drawPositions) do
-			TextureUtils.drawCircleBetweenPoints(
-				prevDrawPosition,
-				drawPosition,
+		local isErasing = actionMetaData.brushTransparency >= 1
+		local stamp = if isErasing
+			then nil
+			else TextureUtils.createLinearStamp(
 				actionMetaData.brushSize,
 				actionMetaData.brushColor,
-				actionMetaData.brushTransparency,
-				brushLayer
+				actionMetaData.tipId
 			)
+
+		local prevDrawPosition = #actionMetaData.drawPositions > 0 and actionMetaData.drawPositions[1] or nil
+		for _, drawPosition in pairs(actionMetaData.drawPositions) do
+			if stamp then
+				TextureUtils.stampBetweenPoints(
+					prevDrawPosition,
+					drawPosition,
+					actionMetaData.brushSize,
+					actionMetaData.tipId,
+					stamp,
+					brushLayer
+				)
+			else
+				TextureUtils.drawCircleBetweenPoints(
+					prevDrawPosition,
+					drawPosition,
+					actionMetaData.brushSize,
+					actionMetaData.brushColor,
+					actionMetaData.brushTransparency,
+					brushLayer
+				)
+			end
 			prevDrawPosition = drawPosition
+		end
+
+		if stamp then
+			stamp:Destroy()
 		end
 
 		local currentRegionMap = textureInfo:getMeshPartRegion(actionMetaData.targetMeshPartName)
@@ -589,11 +645,14 @@ ImageEditActions.StickerAction = {
 			TextureUtils.clear(stickerLayer)
 		end
 
-		local stickerTexture = textureInfo:getOrCreateEditableImageByTextureId(actionMetaData.textureId)
+		local source = textureInfo:getOrCreateEditableImageByTextureId(actionMetaData.textureId)
+		local drawnSize = math.max(source.Size.X, source.Size.Y) * actionMetaData.scale * 0.5
+		local stickerTexture = textureInfo:getStickerImage(actionMetaData.textureId, drawnSize)
+		local drawScale = drawnSize / math.max(stickerTexture.Size.X, stickerTexture.Size.Y)
 		local currentRegionMap = textureInfo:getMeshPartRegion(actionMetaData.targetMeshPartName)
 
 		if currentRegionMap == nil then
-			local scaleVector = Vector2.new(actionMetaData.scale, actionMetaData.scale) * 0.5
+			local scaleVector = Vector2.one * drawScale
 			stickerLayer:DrawImageTransformed(
 				actionMetaData.position,
 				scaleVector,
@@ -607,7 +666,7 @@ ImageEditActions.StickerAction = {
 		else
 			local prevStickerBuffer = stickerLayer:ReadPixelsBuffer(Vector2.zero, stickerLayer.Size)
 
-			local scaleVector = Vector2.new(actionMetaData.scale, actionMetaData.scale) * 0.5
+			local scaleVector = Vector2.one * drawScale
 			stickerLayer:DrawImageTransformed(
 				actionMetaData.position,
 				scaleVector,
@@ -714,7 +773,10 @@ ImageEditActions.ProjectedStickerAction = {
 			TextureUtils.clear(stickerLayer)
 		end
 
-		local stickerTexture = textureInfo:getOrCreateEditableImageByTextureId(actionMetaData.textureId)
+		local texelsPerStud =
+			modelInfo:getTexelsPerStud(targetMeshPart, actionMetaData.position, actionMetaData.scale / 2)
+		local projectedSize = actionMetaData.scale * texelsPerStud * CreationConfig.projectedSticker.oversample
+		local stickerTexture = textureInfo:getStickerImage(actionMetaData.textureId, projectedSize)
 
 		local projectionRotater = CFrame.fromAxisAngle(actionMetaData.direction, actionMetaData.rotation)
 
@@ -730,7 +792,7 @@ ImageEditActions.ProjectedStickerAction = {
 			ColorBlendType = Enum.ImageCombineType.BlendSourceOver,
 			AlphaBlendType = Enum.ImageAlphaType.Default,
 			BlendIntensity = 1,
-			FadeAngle = 45.0,
+			FadeAngle = CreationConfig.projectedSticker.fadeAngle,
 		}
 
 		local meshInfo = modelInfo:getMeshInfo()
@@ -791,7 +853,8 @@ ImageEditActions.TiledStickerAction = {
 			actionMetaData.paintLayerId
 		)
 		local isAccessory = modelInfo:getCreationType() == CreationConfig.creationTypes.accessory
-		local kitbashingEnabled = modelInfo:getKitbashingEnabled()
+		local atlasLayout = modelInfo:getAtlasLayout()
+		local kitbashingEnabled = atlasLayout ~= nil
 
 		if not didCreateLayer then
 			TextureUtils.clear(stickerLayer)
@@ -843,8 +906,8 @@ ImageEditActions.TiledStickerAction = {
 		local upVec = Vector2.new(upVec3.X, upVec3.Y) * upScale
 		local rightVec = Vector2.new(rightVec3.X, rightVec3.Y) * rightScale
 
-		local layerSize = if kitbashingEnabled
-			then stickerLayer.Size / CreationConfig.atlasGridSize
+		local layerSize = if atlasLayout
+			then select(2, AtlasUtil.toPixels(atlasLayout.base, stickerLayer.Size))
 			else stickerLayer.Size
 
 		local leftLimit, rightLimit = getSideLengthFromNormal(actionMetaData.texturePosition, rightVec.Unit, layerSize)
@@ -856,7 +919,9 @@ ImageEditActions.TiledStickerAction = {
 		upLimit = math.floor(upLimit / upScale)
 		downLimit = math.ceil(downLimit / upScale)
 
-		local scaleVector = Vector2.new(clampScale, clampScale) * globalScale
+		local drawnSize = math.max(stickerTexture.Size.X, stickerTexture.Size.Y) * clampScale * globalScale
+		local tileTexture = textureInfo:getStickerImage(actionMetaData.textureId, drawnSize)
+		local scaleVector = Vector2.one * (drawnSize / math.max(tileTexture.Size.X, tileTexture.Size.Y))
 
 		if kitbashingEnabled then
 			local temporaryLayer = AssetService:CreateEditableImage({ Size = layerSize })
@@ -872,7 +937,7 @@ ImageEditActions.TiledStickerAction = {
 						actionMetaData.texturePosition + (yIter * rightVec) + (xIter * upVec),
 						scaleVector,
 						actionMetaData.rotation,
-						stickerTexture,
+						tileTexture,
 						{
 							CombineType = Enum.ImageCombineType.BlendSourceOver,
 							SamplingMode = Enum.ResamplerMode.Default,
@@ -897,7 +962,7 @@ ImageEditActions.TiledStickerAction = {
 						actionMetaData.texturePosition + (yIter * rightVec) + (xIter * upVec),
 						scaleVector,
 						actionMetaData.rotation,
-						stickerTexture,
+						tileTexture,
 						{
 							CombineType = Enum.ImageCombineType.BlendSourceOver,
 							SamplingMode = Enum.ResamplerMode.Default,
@@ -1034,7 +1099,7 @@ ImageEditActions.ProjectionBrushAction = {
 			return false
 		end
 
-		return true
+		return isKnownTipId(actionMetaData.tipId)
 	end,
 	executeAction = function(modelInfo, actionMetaData: ProjectionBrushActionMetadata)
 		local referenceMeshPart = modelInfo:getMeshPartByName(actionMetaData.referenceMeshPartName)
@@ -1059,16 +1124,12 @@ ImageEditActions.ProjectionBrushAction = {
 			imageToDrawOn = intermediateEditableImage
 		end
 
-		local sourceAlpha = if not isErasing then 1.0 else 0.0
-		local targetAlpha = if not isErasing then 0.0 else 1.0
-
 		local projectionBrushCircleTexture, projectionBrushLineTexture, circleBrushConfig, lineBrushConfig =
 			TextureUtils.createAndSetupProjectionBrushTexturesAndConfigs(
-				sourceAlpha,
-				targetAlpha,
 				actionMetaData.brushColor,
 				actionMetaData.colorBlendType,
-				actionMetaData.alphaBlendType
+				actionMetaData.alphaBlendType,
+				actionMetaData.tipId
 			)
 
 		local pbrInfo, pbrBrushTextures = TextureUtils.generatePBRInfo(
@@ -1076,7 +1137,8 @@ ImageEditActions.ProjectionBrushAction = {
 			actionMetaData.isReflectiveMode,
 			textureInfo:getRoughnessMap(referenceMeshPart),
 			textureInfo:getMetalnessMap(referenceMeshPart),
-			textureInfo:getNormalMap(referenceMeshPart)
+			textureInfo:getNormalMap(referenceMeshPart),
+			actionMetaData.tipId
 		)
 
 		local meshInfo = modelInfo:getMeshInfo()

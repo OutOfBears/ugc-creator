@@ -16,6 +16,14 @@ type DrawInfo = {
 	isVirtualCursorMovement: boolean,
 }
 
+type Stamps = {
+	key: string,
+	textures: { EditableImage },
+	circleBrushConfig: BrushConfig,
+	lineBrushConfig: BrushConfig,
+	pbrInfo: TextureUtils.PBRInfo,
+}
+
 export type PbrMaps = {
 	roughnessMap: EditableImage,
 	metalnessMap: EditableImage,
@@ -30,6 +38,8 @@ export type ProjectionBrush = {
 	isReflectiveMode: boolean,
 	colorBlendType: Enum.ImageCombineType,
 	alphaBlendType: Enum.ImageAlphaType,
+	tipId: string?,
+	stamps: Stamps?,
 	currentMeshPart: MeshPart?,
 	allMeshPart: { [MeshPart]: EditableMesh }?,
 	textureInfo: TextureInfo.TextureInfo,
@@ -51,6 +61,7 @@ export type ProjectionBrush = {
 	setSize: (self: ProjectionBrush, newSize: number) -> (),
 	setTransparency: (self: ProjectionBrush, newTransparency: number) -> (),
 	setIsReflective: (self: ProjectionBrush, isReflectiveMode: boolean) -> (),
+	setTip: (self: ProjectionBrush, tipId: string) -> (),
 	setCurrentMeshPart: (self: ProjectionBrush, meshPart: MeshPart) -> (),
 	setColorBlendType: (self: ProjectionBrush, colorBlendType: Enum.ImageCombineType) -> (),
 	setAlphaBlendType: (self: ProjectionBrush, alphaBlendType: Enum.ImageAlphaType) -> (),
@@ -62,7 +73,8 @@ export type ProjectionBrush = {
 	) -> (),
 	getRequireLocalExecute: (self: ProjectionBrush) -> boolean,
 	doDraw: (self: ProjectionBrush, drawInfo: DrawInfo) -> (),
-	tintTransparentPixels: (self: ProjectionBrush, pixels: buffer) -> (),
+	getStamps: (self: ProjectionBrush) -> Stamps,
+	destroyStamps: (self: ProjectionBrush) -> (),
 	getDirtyMaskImage: (self: ProjectionBrush) -> EditableImage?,
 	compositeStroke: (self: ProjectionBrush) -> (),
 	compositeStrokeRegion: (self: ProjectionBrush, position: Vector2, size: Vector2) -> (),
@@ -146,6 +158,14 @@ local function ProjectionBrush(
 
 	--[=[
 		@within ProjectionBrush
+		@param tipId string -- the [BrushTips] tip stamped from now on
+	]=]
+	function object:setTip(tipId: string)
+		self.tipId = tipId
+	end
+
+	--[=[
+		@within ProjectionBrush
 		@param meshPart MeshPart -- the part the stroke is recorded relative to
 	]=]
 	function object:setCurrentMeshPart(meshPart: MeshPart)
@@ -212,26 +232,11 @@ local function ProjectionBrush(
 			self.lastCastedPoint = castedPoint
 		end
 
-		local sourceAlpha = self.alphaBlendType == Enum.ImageAlphaType.Default and 1.0 or 0.0
-		local targetAlpha = self.alphaBlendType == Enum.ImageAlphaType.Default and 0.0 or 1.0
-
-		local projectionBrushCircleTexture, projectionBrushLineTexture, circleBrushConfig, lineBrushConfig =
-			TextureUtils.createAndSetupProjectionBrushTexturesAndConfigs(
-				sourceAlpha,
-				targetAlpha,
-				self.penColor,
-				self.colorBlendType,
-				self.alphaBlendType
-			)
-
 		local isPainting = self.currentState == CreationConfig.paintStates.painting
-		local pbrInfo, pbrBrushTextures = TextureUtils.generatePBRInfo(
-			not isPainting,
-			self.isReflectiveMode,
-			self.roughnessMap,
-			self.metalnessMap,
-			self.normalMap
-		)
+		local stamps = self:getStamps()
+		local circleBrushConfig = stamps.circleBrushConfig
+		local lineBrushConfig = stamps.lineBrushConfig
+		local pbrInfo = stamps.pbrInfo
 
 		local cameraCFrame = drawInfo.cameraCFrame
 		local cameraDirection = cameraCFrame.LookVector
@@ -330,13 +335,79 @@ local function ProjectionBrush(
 		local currentMeshPart = assert(self.currentMeshPart, "ProjectionBrush has no current MeshPart")
 		self.drawPositions[#self.drawPositions + 1] = currentMeshPart.CFrame:PointToObjectSpace(castedPoint)
 		self.drawCamCFrame = currentMeshPart.CFrame:ToObjectSpace(cameraCFrame)
+	end
 
-		projectionBrushLineTexture:Destroy()
-		projectionBrushCircleTexture:Destroy()
+	--[=[
+		@within ProjectionBrush
+		@private
+		@return Stamps -- the color and PBR stamps for the current pen settings
 
-		for _, pbrBrushTexture in pbrBrushTextures do
-			pbrBrushTexture:Destroy()
+		Rasterizing a soft tip is too slow to repeat every sample, so the stamps are kept until a
+		setting they depend on changes.
+	]=]
+	function object:getStamps(): Stamps
+		local isPainting = self.currentState == CreationConfig.paintStates.painting
+		local key = table.concat({
+			self.penColor:ToHex(),
+			self.colorBlendType.Name,
+			self.alphaBlendType.Name,
+			tostring(self.tipId),
+			tostring(self.isReflectiveMode),
+			tostring(isPainting),
+		}, "|")
+
+		local stamps = self.stamps
+		if stamps and stamps.key == key then
+			return stamps
 		end
+
+		self:destroyStamps()
+
+		local circleTexture, lineTexture, circleBrushConfig, lineBrushConfig =
+			TextureUtils.createAndSetupProjectionBrushTexturesAndConfigs(
+				self.penColor,
+				self.colorBlendType,
+				self.alphaBlendType,
+				self.tipId
+			)
+		local pbrInfo, pbrTextures = TextureUtils.generatePBRInfo(
+			not isPainting,
+			self.isReflectiveMode,
+			self.roughnessMap,
+			self.metalnessMap,
+			self.normalMap,
+			self.tipId
+		)
+
+		table.insert(pbrTextures, circleTexture)
+		table.insert(pbrTextures, lineTexture)
+
+		local newStamps: Stamps = {
+			key = key,
+			textures = pbrTextures,
+			circleBrushConfig = circleBrushConfig,
+			lineBrushConfig = lineBrushConfig,
+			pbrInfo = pbrInfo,
+		}
+		self.stamps = newStamps
+
+		return newStamps
+	end
+
+	--[=[
+		@within ProjectionBrush
+		@private
+	]=]
+	function object:destroyStamps()
+		local stamps = self.stamps
+		if not stamps then
+			return
+		end
+
+		for _, texture in stamps.textures do
+			texture:Destroy()
+		end
+		self.stamps = nil
 	end
 
 	--[=[
@@ -353,17 +424,6 @@ local function ProjectionBrush(
 		-- The pre-stroke pixels are re-applied before every merge so the stroke's transparency is
 		-- only ever applied once.
 		self.cachedTargetBuffer = self.targetEditableImage:ReadPixelsBuffer(Vector2.zero, self.targetEditableImage.Size)
-
-		-- The layer is shown directly as a decal, so untouched transparent pixels take the pen color
-		-- and the stroke's edges don't filter against black mid-drag.
-		if self.textureInfo.usesLayerDecals and self.currentState == CreationConfig.paintStates.painting then
-			self:tintTransparentPixels(self.cachedTargetBuffer)
-			self.targetEditableImage:WritePixelsBuffer(
-				Vector2.zero,
-				self.targetEditableImage.Size,
-				self.cachedTargetBuffer
-			)
-		end
 
 		self:doDraw(drawInfo)
 	end
@@ -466,24 +526,6 @@ local function ProjectionBrush(
 
 	--[=[
 		@within ProjectionBrush
-		@private
-		@param pixels buffer -- RGBA pixels of the whole target image, mutated in place
-	]=]
-	function object:tintTransparentPixels(pixels: buffer)
-		local r = math.floor(self.penColor.R * 255 + 0.5)
-		local g = math.floor(self.penColor.G * 255 + 0.5)
-		local b = math.floor(self.penColor.B * 255 + 0.5)
-		local tinted = bit32.bor(r, bit32.lshift(g, 8), bit32.lshift(b, 16))
-
-		for i = 0, buffer.len(pixels) - 4, 4 do
-			if buffer.readu32(pixels, i) == 0 then
-				buffer.writeu32(pixels, i, tinted)
-			end
-		end
-	end
-
-	--[=[
-		@within ProjectionBrush
 		@param drawInfo DrawInfo -- where the pen moved to
 	]=]
 	function object:movePen(drawInfo: DrawInfo)
@@ -548,6 +590,7 @@ local function ProjectionBrush(
 			drawPositions = self.drawPositions,
 			isReflectiveMode = self.isReflectiveMode,
 			brushTransparency = 1 - self.penTransparency,
+			tipId = self.tipId,
 			intermediateEditableImageBuffer = intermediateEditableImage:ReadPixelsBuffer(
 				Vector2.zero,
 				intermediateEditableImage.Size
@@ -563,6 +606,8 @@ local function ProjectionBrush(
 	end
 
 	function object:destroy()
+		self:destroyStamps()
+
 		if self.intermediateEditableImage then
 			self.intermediateEditableImage:Destroy()
 			self.intermediateEditableImage = nil

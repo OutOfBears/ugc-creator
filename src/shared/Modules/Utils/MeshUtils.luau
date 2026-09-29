@@ -1,6 +1,7 @@
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AtlasUtil = require("./AtlasUtil")
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 
 --[=[
@@ -23,7 +24,7 @@ export type MergeKitbashParams = {
 	rotation: number,
 
 	baseTextureLayer: EditableImage?,
-	atlasSlot: number?,
+	slotRect: CreationConfig.AtlasRect?,
 	hasDrawnToAtlas: boolean,
 }
 
@@ -248,8 +249,8 @@ end
 	@param params MergeKitbashParams -- the piece to merge and where to put it
 	@return { number } -- the face ids added to the target mesh, so the merge can be undone
 
-	Merges a kitbash piece into the target mesh: copies its geometry across, draws its texture into
-	the target's atlas slot, and remaps the copied UVs onto that slot.
+	Merges a kitbash piece into the target mesh: copies its geometry across, draws its texture (if
+	any) into the target's atlas slot, and remaps the copied UVs onto that slot.
 ]=]
 local function mergeKitbashPiece(params: MergeKitbashParams): { number }
 	local targetMeshPart = params.targetMeshPart
@@ -271,20 +272,16 @@ local function mergeKitbashPiece(params: MergeKitbashParams): { number }
 		end
 	end
 
+	local slotRect = params.slotRect
 	local hasKitbashTexture = params.kitbashTextureId ~= ""
-	if hasKitbashTexture and not params.hasDrawnToAtlas and params.atlasSlot and params.baseTextureLayer then
-		local atlasSize = params.baseTextureLayer.Size
-		local slotInfo = CreationConfig.atlasSlots[params.atlasSlot]
+	if hasKitbashTexture and not params.hasDrawnToAtlas and slotRect and params.baseTextureLayer then
+		local slotPosition, slotSize = AtlasUtil.toPixels(slotRect, params.baseTextureLayer.Size)
 
 		local kitbashTexture = AssetService:CreateEditableImageAsync(Content.fromUri(params.kitbashTextureId))
 
-		local slotSize = atlasSize.X / CreationConfig.atlasGridSize
-		local scaleX = slotSize / kitbashTexture.Size.X
-		local scaleY = slotSize / kitbashTexture.Size.Y
-
 		params.baseTextureLayer:DrawImageTransformed(
-			Vector2.new(atlasSize.X * slotInfo.uCenter, atlasSize.Y * slotInfo.vCenter),
-			Vector2.new(scaleX, scaleY),
+			slotPosition + slotSize / 2,
+			slotSize / kitbashTexture.Size,
 			0,
 			kitbashTexture
 		)
@@ -315,18 +312,11 @@ local function mergeKitbashPiece(params: MergeKitbashParams): { number }
 		end
 	end
 
-	if hasKitbashTexture and params.atlasSlot then
-		local kitbashUVs = kitbashEditableMesh:GetUVs()
-		local slotInfo = CreationConfig.atlasSlots[params.atlasSlot]
-		local slotScale = 1.0 / CreationConfig.atlasGridSize
-
-		for _, oldUVId in kitbashUVs do
-			local uvCoord = kitbashEditableMesh:GetUV(oldUVId)
-			local remappedUV =
-				Vector2.new(slotInfo.uOffset + (uvCoord.X * slotScale), slotInfo.vOffset + (uvCoord.Y * slotScale))
-
-			local newUVId = targetEditableMesh:AddUV(remappedUV)
-			uvIdMap[oldUVId] = newUVId
+	local remapsUVs = slotRect ~= nil
+	if slotRect then
+		for _, oldUVId in kitbashEditableMesh:GetUVs() do
+			local remappedUV = AtlasUtil.remapUV(kitbashEditableMesh:GetUV(oldUVId), slotRect)
+			uvIdMap[oldUVId] = targetEditableMesh:AddUV(remappedUV)
 		end
 	end
 
@@ -341,7 +331,7 @@ local function mergeKitbashPiece(params: MergeKitbashParams): { number }
 			newVertices[i] = vertexIdMap[oldVertexId]
 		end
 
-		if hasKitbashTexture then
+		if remapsUVs then
 			for i, oldUVId in oldUVs do
 				newUVs[i] = uvIdMap[oldUVId]
 			end
@@ -350,7 +340,7 @@ local function mergeKitbashPiece(params: MergeKitbashParams): { number }
 		if #newVertices == 3 then
 			local newFaceId = targetEditableMesh:AddTriangle(newVertices[1], newVertices[2], newVertices[3])
 
-			if hasKitbashTexture and #newUVs == 3 then
+			if remapsUVs and #newUVs == 3 then
 				targetEditableMesh:SetFaceUVs(newFaceId, newUVs)
 			end
 

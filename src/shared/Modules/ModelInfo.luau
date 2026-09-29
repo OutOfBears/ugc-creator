@@ -1,14 +1,23 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local AccessoryCatalogs = require(ReplicatedStorage.Shared.Data.AccessoryCatalogs)
 local AccessoryUtils = require("./Utils/AccessoryUtils")
 local AttachmentUtils = require("./Utils/AttachmentUtils")
 local Blanks = require(ReplicatedStorage.Shared.Data.Blanks)
 local ColorLayers = require(ReplicatedStorage.Shared.Data.ColorLayers)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
+local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
+local LayerColorCompositor = require("./LayerColorCompositor")
+local Logger = require("./Logger")
 local MeshInfo = require("./MeshInfo")
+local MeshUtils = require("./Utils/MeshUtils")
 local MeshWidgetUtils = require("./Utils/MeshWidgetUtils")
 local ResolutionManager = require("./ResolutionManager")
 local TextureInfo = require("./TextureInfo")
+
+local HEAD_CELL = 0
+
+local logger = Logger.new()
 
 export type ModelInfoOptions = {
 	creationPrice: number?,
@@ -31,13 +40,27 @@ export type ModelInfo = {
 	placedPieces: { any }?,
 	sectionColors: { [string]: { color: Color3, alpha: number } }?,
 	variantSelections: { [string]: number }?,
+	accessorySelections: { [string]: number },
+	accessoryFaceIds: { [string]: { number } },
+	colorCompositors: { [string]: LayerColorCompositor.LayerColorCompositor | false },
+	surfaceSamples: { [MeshPart]: { centroids: { Vector3 }, surfaceAreas: { number }, uvAreas: { number } } },
 	-- methods
 	getModel: (self: ModelInfo) -> Model,
 	getBlankName: (self: ModelInfo) -> string,
 	getCreationType: (self: ModelInfo) -> string,
 	getKitbashingEnabled: (self: ModelInfo) -> boolean?,
+	getAtlasLayout: (self: ModelInfo) -> CreationConfig.AtlasLayout?,
 	getLayerCatalogName: (self: ModelInfo) -> string?,
 	getLayerCatalog: (self: ModelInfo) -> ColorLayers.Catalog?,
+	getAccessoryCatalog: (self: ModelInfo) -> AccessoryCatalogs.AccessoryCatalog?,
+	getAccessorySlot: (self: ModelInfo, slotName: string) -> AccessoryCatalogs.AccessorySlot?,
+	getSelectedAccessory: (self: ModelInfo, slotName: string) -> AccessoryCatalogs.AccessoryOption?,
+	getAccessorySelections: (self: ModelInfo) -> { [string]: number },
+	getColorTargetPart: (self: ModelInfo) -> MeshPart?,
+	resolveColorKey: (self: ModelInfo, key: string) -> (ColorLayers.Catalog?, number, string),
+	setAccessory: (self: ModelInfo, slotName: string, optionIndex: number) -> (),
+	getTexelsPerStud: (self: ModelInfo, meshPart: MeshPart, center: Vector3?, radius: number?) -> number,
+	bakeLayerColors: (self: ModelInfo, cell: number?) -> (),
 	getStickerPatterningEnabled: (self: ModelInfo) -> boolean?,
 	getWidgetMeshEditingEnabled: (self: ModelInfo) -> boolean?,
 	getRegionalStickerPatterningEnabled: (self: ModelInfo) -> boolean?,
@@ -135,6 +158,11 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 	object.meshPartsByNameMap = buildMeshPartsByNameMap(model)
 	object.originalTextureIdMap = buildOriginalTextureIdMap(model)
 
+	object.accessorySelections = {}
+	object.accessoryFaceIds = {}
+	object.colorCompositors = {}
+	object.surfaceSamples = {}
+
 	--[=[
 		@within ModelInfo
 		@return Model -- the model being edited
@@ -169,6 +197,14 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 
 	--[=[
 		@within ModelInfo
+		@return AtlasLayout? -- how the color map is divided between this creation's own texture and attached pieces, or nil if it isn't an atlas
+	]=]
+	function object:getAtlasLayout(): CreationConfig.AtlasLayout?
+		return Blanks.getAtlasLayout(self.blank)
+	end
+
+	--[=[
+		@within ModelInfo
 		@return string? -- the color-layer catalog name this blank recolors through, if any
 	]=]
 	function object:getLayerCatalogName(): string?
@@ -182,6 +218,282 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 	function object:getLayerCatalog(): ColorLayers.Catalog?
 		local catalogName = self.blank.layerCatalogName
 		return if catalogName then ColorLayers[catalogName] else nil
+	end
+
+	--[=[
+		@within ModelInfo
+		@return AccessoryCatalog? -- the swappable accessories for this blank, or nil if it has none
+	]=]
+	function object:getAccessoryCatalog(): AccessoryCatalogs.AccessoryCatalog?
+		local catalogName = self.blank.accessoryCatalogName
+		return if catalogName then AccessoryCatalogs[catalogName] else nil
+	end
+
+	--[=[
+		@within ModelInfo
+		@param slotName string -- e.g. `"Ears"`
+		@return AccessorySlot? -- the slot, or nil if this blank has no such slot
+	]=]
+	function object:getAccessorySlot(slotName: string): AccessoryCatalogs.AccessorySlot?
+		local catalog = self:getAccessoryCatalog()
+		if not catalog then
+			return nil
+		end
+
+		for _, slot in catalog.slots do
+			if slot.name == slotName then
+				return slot
+			end
+		end
+
+		return nil
+	end
+
+	--[=[
+		@within ModelInfo
+		@param slotName string -- the slot to look up
+		@return AccessoryOption? -- the option merged into that slot, or nil if it is empty
+	]=]
+	function object:getSelectedAccessory(slotName: string): AccessoryCatalogs.AccessoryOption?
+		local slot = self:getAccessorySlot(slotName)
+		local optionIndex = self.accessorySelections[slotName]
+
+		return if slot and optionIndex then slot.options[optionIndex] else nil
+	end
+
+	--[=[
+		@within ModelInfo
+		@return { [string]: number } -- the selected option index per slot name, 0 for an empty slot
+	]=]
+	function object:getAccessorySelections(): { [string]: number }
+		return self.accessorySelections
+	end
+
+	--[=[
+		@within ModelInfo
+		@return MeshPart? -- the part color layers and accessories are applied to
+	]=]
+	function object:getColorTargetPart(): MeshPart?
+		return self:getMeshPartByName("Head") or self.meshParts[1]
+	end
+
+	--[=[
+		@within ModelInfo
+		@param key string -- a head section or variant group name, or `"<slot>.<name>"` for an accessory's
+		@return ColorLayers.Catalog? -- the catalog the key belongs to, or nil if there is none
+		@return number -- the atlas cell that catalog is baked into, 0 for the head
+		@return string -- the section or group name within that catalog
+
+		Accessory keys resolve against the slot's currently selected option.
+	]=]
+	function object:resolveColorKey(key: string): (ColorLayers.Catalog?, number, string)
+		local slotName, name = string.match(key, "^(.-)%.(.+)$")
+		if not slotName or not name then
+			return self:getLayerCatalog(), HEAD_CELL, key
+		end
+
+		local slot = self:getAccessorySlot(slotName)
+		local option = self:getSelectedAccessory(slotName)
+		if not slot or not option then
+			return nil, HEAD_CELL, name
+		end
+
+		return option.colors, slot.atlasSlot, name
+	end
+
+	--[=[
+		@within ModelInfo
+		@param slotName string -- the slot to change
+		@param optionIndex number -- 1-based option, or 0 to empty an optional slot
+
+		Swaps the accessory merged into the head: removes the previous option's faces, clears its
+		atlas cell from every paint layer, merges the new option's mesh and bakes its colors. Face ids
+		are local to this side, so the client and the server each track their own.
+	]=]
+	function object:setAccessory(slotName: string, optionIndex: number)
+		local slot = assert(self:getAccessorySlot(slotName), `Unknown accessory slot '{slotName}'`)
+		local targetPart = assert(self:getColorTargetPart(), "Accessories need a target part")
+
+		local meshInfo = self:getMeshInfo()
+		local targetEditableMesh = meshInfo:getKitbashEditableMeshMap()[targetPart]
+
+		local previousFaceIds = self.accessoryFaceIds[slotName]
+		if previousFaceIds then
+			for _, faceId in previousFaceIds do
+				targetEditableMesh:RemoveFace(faceId)
+			end
+			targetEditableMesh:RemoveUnused()
+			self.accessoryFaceIds[slotName] = nil
+		end
+
+		self.textureInfo:clearAtlasSlot(targetPart, slot.atlasSlot)
+		self.accessorySelections[slotName] = optionIndex
+
+		local option = slot.options[optionIndex]
+		if option then
+			self.accessoryFaceIds[slotName] = MeshUtils.mergeKitbashPiece({
+				targetMeshPart = targetPart,
+				targetEditableMesh = targetEditableMesh,
+				targetScaleFactor = meshInfo:getScaleFactorMap()[targetPart],
+				kitbashMeshId = option.meshId,
+				kitbashTextureId = "",
+				positionMarkerCFrame = targetPart.CFrame * (option.offset or CFrame.identity),
+				scale = option.scale or 1,
+				rotation = 0,
+				slotRect = assert(self:getAtlasLayout(), "Accessories need an atlas").slots[slot.atlasSlot],
+				hasDrawnToAtlas = true,
+			})
+		end
+
+		table.clear(self.surfaceSamples)
+		self:bakeLayerColors(slot.atlasSlot)
+	end
+
+	--[=[
+		@within ModelInfo
+		@param meshPart MeshPart -- the part to measure
+		@param center Vector3? -- a point in the part's local space to measure around, or nil for the whole part
+		@param radius number? -- how far from `center` to measure, in studs
+		@return number -- color-map texels per stud of that surface
+
+		Compares the surface area of the triangles against the texture area their UVs cover. UV layouts
+		give some areas (the face) more texels than others, so a sticker should measure where it lands.
+		Per-triangle areas are cached until the mesh changes shape (an accessory swap); a query that
+		finds no triangles falls back to the whole part.
+	]=]
+	function object:getTexelsPerStud(meshPart: MeshPart, center: Vector3?, radius: number?): number
+		local samples = self.surfaceSamples[meshPart]
+		if not samples then
+			local editableMesh = self.meshInfo:getEditableMesh(meshPart)
+			local scaleFactor = self.meshInfo:getScaleFactorMap()[meshPart] or Vector3.one
+			local imageSize = self.textureInfo:getImageSize(meshPart)
+
+			samples = { centroids = {}, surfaceAreas = {}, uvAreas = {} }
+			for _, faceId in editableMesh:GetFaces() do
+				local vertices = editableMesh:GetFaceVertices(faceId)
+				local uvIds = editableMesh:GetFaceUVs(faceId)
+				if #vertices ~= 3 or #uvIds ~= 3 then
+					continue
+				end
+
+				local a = editableMesh:GetPosition(vertices[1]) / scaleFactor
+				local b = editableMesh:GetPosition(vertices[2]) / scaleFactor
+				local c = editableMesh:GetPosition(vertices[3]) / scaleFactor
+
+				local uvA = (editableMesh:GetUV(uvIds[1]) :: Vector2) * imageSize
+				local uvB = (editableMesh:GetUV(uvIds[2]) :: Vector2) * imageSize
+				local uvC = (editableMesh:GetUV(uvIds[3]) :: Vector2) * imageSize
+
+				table.insert(samples.centroids, (a + b + c) / 3)
+				table.insert(samples.surfaceAreas, (b - a):Cross(c - a).Magnitude / 2)
+				table.insert(
+					samples.uvAreas,
+					math.abs((uvB.X - uvA.X) * (uvC.Y - uvA.Y) - (uvC.X - uvA.X) * (uvB.Y - uvA.Y)) / 2
+				)
+			end
+			self.surfaceSamples[meshPart] = samples
+		end
+
+		local function measure(isInRange: (index: number) -> boolean): number?
+			local surfaceArea, uvArea = 0, 0
+			for index, area in samples.surfaceAreas do
+				if isInRange(index) then
+					surfaceArea += area
+					uvArea += samples.uvAreas[index]
+				end
+			end
+
+			return if surfaceArea > 0 then math.sqrt(uvArea / surfaceArea) else nil
+		end
+
+		local localDensity = if center and radius
+			then measure(function(index)
+				return (samples.centroids[index] - center).Magnitude <= radius
+			end)
+			else nil
+
+		return localDensity or measure(function()
+			return true
+		end) or self.textureInfo:getImageSize(meshPart).X
+	end
+
+	--[=[
+		@within ModelInfo
+		@param cell number? -- the atlas cell to repaint (0 for the head), or nil for every cell
+
+		Composites the color layers, tinted by the stored section colors, into the base texture, then
+		merges the paint back over it. A cell whose layer PNGs can't be loaded (e.g. session-only
+		`rbxtemp://` ids on the server) is left white and warned about once.
+	]=]
+	function object:bakeLayerColors(cell: number?)
+		local targetPart = self:getColorTargetPart()
+		if not targetPart then
+			return
+		end
+
+		local baseImage = self.textureInfo:getBaseLayer(targetPart)
+
+		local function getCompositor(key: string, catalog: ColorLayers.Catalog, cellSize: Vector2)
+			local compositor = self.colorCompositors[key]
+			if compositor == nil then
+				local ok, result = pcall(LayerColorCompositor, catalog, cellSize)
+				if not ok and string.find(tostring(result), CreationStrings.failedToCreateImage, 1, true) then
+					error(result)
+				elseif not ok then
+					logger:warn(`Could not load color layers for '{key}': {result}`)
+				end
+
+				compositor = if ok then result else false
+				self.colorCompositors[key] = compositor
+			end
+
+			return compositor
+		end
+
+		local function bakeCell(cellIndex: number, key: string, catalog: ColorLayers.Catalog?, keyPrefix: string)
+			local origin, cellSize
+			if cellIndex == HEAD_CELL then
+				origin, cellSize = Vector2.zero, self.textureInfo:getTextureSize(targetPart)
+			else
+				origin, cellSize = self.textureInfo:getAtlasSlotRect(targetPart, cellIndex)
+			end
+
+			local compositor = if catalog then getCompositor(key, catalog, cellSize) else false
+			if compositor then
+				compositor:composeInto(
+					baseImage,
+					origin,
+					self:getSectionColors(),
+					self:getVariantSelections(),
+					keyPrefix
+				)
+			else
+				baseImage:DrawRectangle(origin, cellSize, Color3.new(1, 1, 1), 0, Enum.ImageCombineType.Overwrite)
+			end
+		end
+
+		if cell == nil or cell == HEAD_CELL then
+			bakeCell(HEAD_CELL, "Head", self:getLayerCatalog(), "")
+		end
+
+		local accessoryCatalog = self:getAccessoryCatalog()
+		if accessoryCatalog then
+			for _, slot in accessoryCatalog.slots do
+				if cell ~= nil and cell ~= slot.atlasSlot then
+					continue
+				end
+
+				local option = self:getSelectedAccessory(slot.name)
+				bakeCell(
+					slot.atlasSlot,
+					if option then `{slot.name}.{option.name}` else slot.name,
+					if option then option.colors else nil,
+					`{slot.name}.`
+				)
+			end
+		end
+
+		self.textureInfo:updateOutputColorMap(targetPart)
 	end
 
 	--[=[
@@ -433,6 +745,13 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 	end
 
 	function object:destroy()
+		for _, compositor in self.colorCompositors do
+			if compositor then
+				compositor:destroy()
+			end
+		end
+		table.clear(self.colorCompositors)
+
 		if self.model then
 			self.model:Destroy()
 		end
@@ -479,6 +798,22 @@ local function ModelInfo(model: Model, blank: Blanks.Blank, options: ModelInfoOp
 		end
 
 		table.insert(object.meshParts, meshPart)
+	end
+
+	local bakeSuccess, bakeError = pcall(function()
+		local accessoryCatalog = object:getAccessoryCatalog()
+		if accessoryCatalog then
+			for _, slot in accessoryCatalog.slots do
+				object:setAccessory(slot.name, if slot.optional then 0 else 1)
+			end
+		end
+		if blank.layerCatalogName then
+			object:bakeLayerColors(0)
+		end
+	end)
+	if not bakeSuccess then
+		object:destroy()
+		error(bakeError)
 	end
 
 	AttachmentUtils.addOriginalPositions(model)
