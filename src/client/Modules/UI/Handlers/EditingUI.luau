@@ -2,11 +2,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local AccessorySwapToolUI = require("./AccessorySwapToolUI")
-local BrushToolUI = require("./BrushToolUI")
+local BrushPanel = require(ReplicatedStorage.Interfaces.Views.Creation.BrushPanel)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationIcons = require(ReplicatedStorage.Shared.Data.CreationIcons)
-local EraserToolUI = require("./EraserToolUI")
+local EraserPanel = require(ReplicatedStorage.Interfaces.Views.Creation.EraserPanel)
 local FillToolUI = require("./FillToolUI")
 local IconButton = require("../Components/IconButton")
 local Kitbash = require(ReplicatedStorage.Shared.Data.Kitbash)
@@ -40,8 +40,8 @@ export type EditingUI = {
 	screenGui: ScreenGui,
 	panelParent: Frame,
 	toolbar: Toolbar.Toolbar,
-	brushToolUI: BrushToolUI.BrushToolUI,
-	eraserToolUI: EraserToolUI.EraserToolUI,
+	brushToolUI: ReactPanelHost.ReactPanelHost,
+	eraserToolUI: ReactPanelHost.ReactPanelHost,
 	fillToolUI: FillToolUI.FillToolUI?,
 	stickerToolUI: StickerToolUI.StickerToolUI,
 	stickerPatternToolUI: StickerPatternToolUI.StickerPatternToolUI,
@@ -198,84 +198,21 @@ local function EditingUI(
 	end
 
 	local function createBrushToolUI()
-		local minBrushSize = CreationConfig.minBrushSize
-		local maxBrushSize = CreationConfig.maxBrushSize
-		local defaultBrushSize = 10
-
-		local defaultSliderVal = defaultBrushSize / (maxBrushSize - minBrushSize)
-
-		local onDeleteCallback = function()
-			object.brushTool:clearAll()
-		end
-
-		local onSliderChangedCallback = function(newValue, isFinalInput)
-			local brushSize = newValue * (maxBrushSize - minBrushSize) + minBrushSize
-			object.brushTool:onBrushSizeChanged(brushSize, isFinalInput)
-		end
-
-		local onColorChangedCallback = function(color, _isFinalInput)
-			object.brushTool:onColorChanged(color)
-		end
-		local reflectiveModeCallback = function(isReflectiveMode)
-			object.brushTool:setIsReflective(isReflectiveMode)
-		end
-		local transparencyPickerCallback = function(transparency)
-			object.brushTool:setTransparency(transparency)
-		end
-
-		object.brushToolUI = maid:add(
-			BrushToolUI(
-				object.creationInput,
-				onClosePanel,
-				onDeleteCallback,
-				defaultSliderVal,
-				onSliderChangedCallback,
-				onColorChangedCallback,
-				reflectiveModeCallback,
-				transparencyPickerCallback
-			)
-		)
+		object.brushToolUI = maid:add(ReactPanelHost(object, BrushPanel, onClosePanel))
 
 		object.brushTool:onColorChanged(
 			Color3.fromHSV(
-				StyleConsts.defaultColorPickerColor.h,
-				StyleConsts.defaultColorPickerColor.s,
-				StyleConsts.defaultColorPickerColor.v
+				CreationConfig.defaultColorPickerColor.h,
+				CreationConfig.defaultColorPickerColor.s,
+				CreationConfig.defaultColorPickerColor.v
 			)
 		)
-
-		object.brushToolUI.panel.frame.Parent = object.panelParent
 	end
 
 	local function createEraserToolUI()
-		local minBrushSize = CreationConfig.minBrushSize
-		local maxBrushSize = CreationConfig.maxBrushSize
-		local defaultBrushSize = 5
+		object.eraserToolUI = maid:add(ReactPanelHost(object, EraserPanel, onClosePanel))
 
-		local defaultSliderVal = defaultBrushSize / (maxBrushSize - minBrushSize)
-
-		local onDeleteCallback = function()
-			object.brushTool:clearAll()
-		end
-
-		local onSliderChangedCallback = function(newValue, isFinalInput)
-			local brushSize = newValue * (maxBrushSize - minBrushSize) + minBrushSize
-			object.brushTool:onBrushSizeChanged(brushSize, isFinalInput)
-		end
-
-		object.eraserToolUI = maid:add(
-			EraserToolUI(
-				object.creationInput,
-				onClosePanel,
-				onDeleteCallback,
-				defaultSliderVal,
-				onSliderChangedCallback
-			)
-		)
-
-		object.brushTool:onEraserSizeChanged(defaultBrushSize)
-
-		object.eraserToolUI.panel.frame.Parent = object.panelParent
+		object.brushTool:onEraserSizeChanged(CreationConfig.defaultEraserSize)
 	end
 
 	local function createFillToolUI()

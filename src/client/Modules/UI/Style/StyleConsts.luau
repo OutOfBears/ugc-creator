@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local StyleLayouts = require(ReplicatedStorage.Shared.Data.StyleLayouts)
 
 export type ColorPickerColor = {
@@ -160,11 +161,7 @@ local StyleConsts: StyleConsts = {
 
 	mobileWidthCutoff = StyleLayouts.mobileWidthCutoff,
 
-	defaultColorPickerColor = {
-		h = 0,
-		s = 1,
-		v = 1,
-	},
+	defaultColorPickerColor = CreationConfig.defaultColorPickerColor,
 }
 
 table.freeze(StyleConsts)

@@ -1,10 +1,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
+local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local ImageEditActions = require(ReplicatedStorage.Shared.Modules.Actions.ImageEditActions)
 local ModelInfo = require(ReplicatedStorage.Shared.Modules.ModelInfo)
 local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
-local StyleConsts = require("../UI/Style/StyleConsts")
 local TextureInfo = require(ReplicatedStorage.Shared.Modules.TextureInfo)
 
 export type FabricTool = {
@@ -39,9 +39,9 @@ local function FabricTool(modelInfo: ModelInfo.ModelInfo): FabricTool
 	object.fillOpacity = 1
 	object.isReflectiveMode = false
 	object.lastAppliedColor = Color3.fromHSV(
-		StyleConsts.defaultColorPickerColor.h,
-		StyleConsts.defaultColorPickerColor.s,
-		StyleConsts.defaultColorPickerColor.v
+		CreationConfig.defaultColorPickerColor.h,
+		CreationConfig.defaultColorPickerColor.s,
+		CreationConfig.defaultColorPickerColor.v
 	)
 
 	object.selectedRegionName = nil

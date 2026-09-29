@@ -27,6 +27,24 @@ export type CreationStrings = {
 	layerHiddenPaint: string,
 
 	counters: { sticker: string, kitbash: string },
+
+	panelTitles: {
+		brush: string,
+		eraser: string,
+		recolor: string,
+		layerColor: string,
+		stickers: string,
+		pattern: string,
+		kitbash: string,
+		accessories: string,
+	},
+	toolTitles: {
+		brushSize: string,
+		color: string,
+		padding: string,
+		pattern: string,
+		sections: string,
+	},
 }
 
 --[=[
@@ -68,6 +86,24 @@ local strings: CreationStrings = {
 	counters = {
 		sticker = "Stickers Applied",
 		kitbash = "Add-Ons Applied",
+	},
+
+	panelTitles = {
+		brush = "Paintbrush",
+		eraser = "Eraser",
+		recolor = "Recolor",
+		layerColor = "Colors",
+		stickers = "Stickers",
+		pattern = "Pattern",
+		kitbash = "Add-Ons",
+		accessories = "Accessories",
+	},
+	toolTitles = {
+		brushSize = "Brush Size",
+		color = "Color",
+		padding = "Padding",
+		pattern = "Pattern",
+		sections = "Sections",
 	},
 }
 
