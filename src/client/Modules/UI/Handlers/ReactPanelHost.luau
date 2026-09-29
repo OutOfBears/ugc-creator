@@ -7,7 +7,6 @@ local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local React = require(ReplicatedStorage.Packages.React)
 local ReactRoblox = require(ReplicatedStorage.Packages.ReactRoblox)
 local StyleLayouts = require(ReplicatedStorage.Shared.Data.StyleLayouts)
-local StyleUtils = require("../Style/StyleUtils")
 
 local createElement = React.createElement
 
@@ -29,9 +28,10 @@ export type ReactPanelHost = {
 	still vanilla. The view renders in its own ScreenGui laid over `panelParent`, because the
 	editor's StyleSheet would restyle any of its properties left at their engine default. A
 	transparent placeholder takes the panel's slot in `panelParent` so the toolbar layout and the UV
-	canvas anchor behave as they did.
+	canvas anchor behave as they did. Mobile or desktop follows the theme the StyleSheet applied,
+	not the screen size, so the panel always matches the vanilla toolbar around it.
 
-	@param editingUI any -- the owning [EditingUI]; its `screenGui`, `panelParent` and `session` are read
+	@param editingUI any -- the owning [EditingUI]; its `screenGui`, `panelParent`, `session` and `style` are read
 	@param view any -- a React panel view taking `{ visible: boolean, onClose: () -> () }`
 	@param onClose () -> () -- fired by the panel's close button
 	@return ReactPanelHost
@@ -43,6 +43,7 @@ local function ReactPanelHost(editingUI: any, view: any, onClose: () -> ()): Rea
 	local editingGui: ScreenGui = editingUI.screenGui
 	local panelParent: Frame = editingUI.panelParent
 	local session = editingUI.session
+	local style = editingUI.style
 
 	local isVisible = false
 
@@ -72,7 +73,7 @@ local function ReactPanelHost(editingUI: any, view: any, onClose: () -> ()): Rea
 	end)
 
 	local function render()
-		local isMobile = StyleUtils.getIsMobile(editingGui)
+		local isMobile = style.themeDerive.StyleSheet == style.phoneTheme
 		local layout = if isMobile then StyleLayouts.mobile else StyleLayouts.desktop
 
 		placeholder.AnchorPoint = layout.PanelAnchorPoint
@@ -82,10 +83,12 @@ local function ReactPanelHost(editingUI: any, view: any, onClose: () -> ()): Rea
 
 		hostGui.Enabled = editingGui.Enabled
 
+		local offset = panelParent.AbsolutePosition - hostGui.AbsolutePosition
+
 		root:render(createElement("Frame", {
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(panelParent.AbsolutePosition.X, panelParent.AbsolutePosition.Y),
+			Position = UDim2.fromOffset(offset.X, offset.Y),
 			Size = UDim2.fromOffset(panelParent.AbsoluteSize.X, panelParent.AbsoluteSize.Y),
 		}, {
 			scope = createElement(CreationScope, {
@@ -103,7 +106,7 @@ local function ReactPanelHost(editingUI: any, view: any, onClose: () -> ()): Rea
 
 	maid:add(panelParent:GetPropertyChangedSignal("AbsolutePosition"):Connect(render))
 	maid:add(panelParent:GetPropertyChangedSignal("AbsoluteSize"):Connect(render))
-	maid:add(editingGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(render))
+	maid:add(style.themeDerive:GetPropertyChangedSignal("StyleSheet"):Connect(render))
 	maid:add(editingGui:GetPropertyChangedSignal("Enabled"):Connect(render))
 
 	--[=[
