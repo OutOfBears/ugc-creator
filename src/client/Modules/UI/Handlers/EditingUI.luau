@@ -1,7 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local AccessorySwapToolUI = require("./AccessorySwapToolUI")
+local AccessoriesPanel = require(ReplicatedStorage.Interfaces.Views.Creation.AccessoriesPanel)
 local BrushPanel = require(ReplicatedStorage.Interfaces.Views.Creation.BrushPanel)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
@@ -11,7 +11,7 @@ local FillPanel = require(ReplicatedStorage.Interfaces.Views.Creation.FillPanel)
 local IconButton = require("../Components/IconButton")
 local Kitbash = require(ReplicatedStorage.Shared.Data.Kitbash)
 local KitbashToolUI = require("./KitbashToolUI")
-local LayerColorToolUI = require("./LayerColorToolUI")
+local LayerColorPanel = require(ReplicatedStorage.Interfaces.Views.Creation.LayerColorPanel)
 local LayersPanel = require(ReplicatedStorage.Interfaces.Views.Creation.LayersPanel)
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local ReactPanelHost = require("./ReactPanelHost")
@@ -46,8 +46,8 @@ export type EditingUI = {
 	stickerToolUI: StickerToolUI.StickerToolUI,
 	stickerPatternToolUI: StickerPatternToolUI.StickerPatternToolUI,
 	kitbashToolUI: KitbashToolUI.KitbashToolUI,
-	layerColorToolUI: LayerColorToolUI.LayerColorToolUI?,
-	accessorySwapToolUI: AccessorySwapToolUI.AccessorySwapToolUI?,
+	layerColorToolUI: ReactPanelHost.ReactPanelHost?,
+	accessorySwapToolUI: ReactPanelHost.ReactPanelHost?,
 	layersToolUI: ReactPanelHost.ReactPanelHost,
 	uvCanvasUI: UVCanvasUI.UVCanvasUI,
 	canvasButtonGroup: Frame,
@@ -220,65 +220,15 @@ local function EditingUI(
 	end
 
 	local function createLayerColorToolUI()
-		local modelInfo = object.session.modelInfo
-		local catalog = modelInfo:getLayerCatalog()
-		if not catalog then
-			return
-		end
-
-		local getColorGroups = function()
-			local colorGroups: { LayerColorToolUI.ColorGroup } = { { keyPrefix = "", catalog = catalog } }
-
-			local accessoryCatalog = modelInfo:getAccessoryCatalog()
-			if accessoryCatalog then
-				for _, slot in accessoryCatalog.slots do
-					local option = modelInfo:getSelectedAccessory(slot.name)
-					if option then
-						table.insert(colorGroups, { keyPrefix = `{slot.name}.`, catalog = option.colors })
-					end
-				end
-			end
-
-			return colorGroups
-		end
-		local sectionColorChanged = function(sectionName, color, opacity, isFinalInput)
-			object.layerColorTool:applySectionColor(sectionName, color, opacity, isFinalInput)
-		end
-		local variantSelected = function(groupName, optionIndex)
-			object.layerColorTool:selectVariant(groupName, optionIndex)
-		end
-		local deleteCallback = function() end
-
-		object.layerColorToolUI = maid:add(
-			LayerColorToolUI(onClosePanel, deleteCallback, getColorGroups, sectionColorChanged, variantSelected)
-		)
-		object.layerColorToolUI.panel.frame.Parent = object.panelParent
+		object.layerColorToolUI = maid:add(ReactPanelHost(object, LayerColorPanel, onClosePanel))
 	end
 
 	local function createAccessorySwapToolUI()
-		local modelInfo = object.session.modelInfo
-		local catalog = modelInfo:getAccessoryCatalog()
-		local accessorySwapTool = object.session.accessorySwapTool
-		if not catalog or not accessorySwapTool then
+		if not object.session.modelInfo:getAccessoryCatalog() or not object.session.accessorySwapTool then
 			return
 		end
 
-		local getSelections = function()
-			return modelInfo:getAccessorySelections()
-		end
-		local optionSelected = function(slotName, optionIndex)
-			local swapped = accessorySwapTool:selectOption(slotName, optionIndex)
-			if swapped and object.layerColorToolUI then
-				object.layerColorToolUI:refresh()
-			end
-
-			return swapped
-		end
-		local deleteCallback = function() end
-
-		object.accessorySwapToolUI =
-			maid:add(AccessorySwapToolUI(onClosePanel, deleteCallback, catalog, getSelections, optionSelected))
-		object.accessorySwapToolUI.panel.frame.Parent = object.panelParent
+		object.accessorySwapToolUI = maid:add(ReactPanelHost(object, AccessoriesPanel, onClosePanel))
 	end
 
 	local function createStickerToolUI()
