@@ -9,15 +9,13 @@ local CreationIcons = require(ReplicatedStorage.Shared.Data.CreationIcons)
 local EraserPanel = require(ReplicatedStorage.Interfaces.Views.Creation.EraserPanel)
 local FillPanel = require(ReplicatedStorage.Interfaces.Views.Creation.FillPanel)
 local IconButton = require("../Components/IconButton")
-local Kitbash = require(ReplicatedStorage.Shared.Data.Kitbash)
-local KitbashToolUI = require("./KitbashToolUI")
+local KitbashPanel = require(ReplicatedStorage.Interfaces.Views.Creation.KitbashPanel)
 local LayerColorPanel = require(ReplicatedStorage.Interfaces.Views.Creation.LayerColorPanel)
 local LayersPanel = require(ReplicatedStorage.Interfaces.Views.Creation.LayersPanel)
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
+local PatternPanel = require(ReplicatedStorage.Interfaces.Views.Creation.PatternPanel)
 local ReactPanelHost = require("./ReactPanelHost")
-local StickerPatternToolUI = require("./StickerPatternToolUI")
-local StickerToolUI = require("./StickerToolUI")
-local Stickers = require(ReplicatedStorage.Shared.Data.Stickers)
+local StickersPanel = require(ReplicatedStorage.Interfaces.Views.Creation.StickersPanel)
 local StyleConsts = require("../Style/StyleConsts")
 local StyleUtils = require("../Style/StyleUtils")
 local Toolbar = require("../Components/Toolbar")
@@ -43,9 +41,9 @@ export type EditingUI = {
 	brushToolUI: ReactPanelHost.ReactPanelHost,
 	eraserToolUI: ReactPanelHost.ReactPanelHost,
 	fillToolUI: ReactPanelHost.ReactPanelHost?,
-	stickerToolUI: StickerToolUI.StickerToolUI,
-	stickerPatternToolUI: StickerPatternToolUI.StickerPatternToolUI,
-	kitbashToolUI: KitbashToolUI.KitbashToolUI,
+	stickerToolUI: ReactPanelHost.ReactPanelHost,
+	stickerPatternToolUI: ReactPanelHost.ReactPanelHost,
+	kitbashToolUI: ReactPanelHost.ReactPanelHost,
 	layerColorToolUI: ReactPanelHost.ReactPanelHost?,
 	accessorySwapToolUI: ReactPanelHost.ReactPanelHost?,
 	layersToolUI: ReactPanelHost.ReactPanelHost,
@@ -232,62 +230,15 @@ local function EditingUI(
 	end
 
 	local function createStickerToolUI()
-		local deleteCallback = function()
-			object.stickerTool:deleteCurrentSticker()
-			object.stickerToolUI:updateProgress()
-		end
-
-		object.stickerToolUI = maid:add(StickerToolUI(onClosePanel, deleteCallback, Stickers, object.stickerTool))
-		object.stickerToolUI.panel.frame.Parent = object.panelParent
+		object.stickerToolUI = maid:add(ReactPanelHost(object, StickersPanel, onClosePanel))
 	end
 
 	local function createStickerPatternToolUI()
-		local deleteCallback = function()
-			object.stickerTool:deleteCurrentSticker()
-			object.stickerPatternToolUI:updateProgress()
-		end
-
-		local regionParts = if object.session.modelInfo:getRegionalStickerPatterningEnabled()
-			then object.session.modelInfo:getRegionPartsList()
-			else nil
-		local selectedRegionCallback = function(selectedRegion)
-			object.stickerTool:setSelectedRegion(selectedRegion)
-		end
-
-		local minPadding = CreationConfig.minStickerPadding
-		local maxPadding = CreationConfig.maxStickerPadding
-		local defaultPadding = 0
-
-		local sliderCallback = function(newValue, isFinalInput)
-			local paddingValue = newValue * (maxPadding - minPadding) + minPadding
-			object.stickerTool:onPatternPaddingChanged(paddingValue, isFinalInput)
-		end
-
-		object.stickerPatternToolUI = maid:add(
-			StickerPatternToolUI(
-				object.creationInput,
-				onClosePanel,
-				deleteCallback,
-				selectedRegionCallback,
-				sliderCallback,
-				defaultPadding,
-				regionParts,
-				Stickers,
-				object.stickerTool
-			)
-		)
-
-		object.stickerPatternToolUI.panel.frame.Parent = object.panelParent
+		object.stickerPatternToolUI = maid:add(ReactPanelHost(object, PatternPanel, onClosePanel))
 	end
 
 	local function createKitbashToolUI()
-		local deleteCallback = function()
-			object.kitbashTool:deleteCurrentPiece()
-			object.kitbashToolUI:updateProgress()
-		end
-
-		object.kitbashToolUI = maid:add(KitbashToolUI(onClosePanel, deleteCallback, Kitbash, object.kitbashTool))
-		object.kitbashToolUI.panel.frame.Parent = object.panelParent
+		object.kitbashToolUI = maid:add(ReactPanelHost(object, KitbashPanel, onClosePanel))
 	end
 
 	local function openWidgetControls(widgetControlName: string)

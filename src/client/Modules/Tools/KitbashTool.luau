@@ -4,6 +4,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
 local AssetUtil = require(ReplicatedStorage.Shared.Modules.Utils.AssetUtil)
+local Charm = require(ReplicatedStorage.Packages.Charm)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationInput = require("../CreationInput")
@@ -47,6 +48,7 @@ export type KitbashPieceData = {
 
 export type KitbashTool = {
 	-- vars
+	pieceCount: Charm.Atom<number>,
 	modelInfo: ModelInfo.ModelInfo,
 	inputManager: CreationInput.CreationInput,
 	modelDisplay: ModelDisplay.ModelDisplay,
@@ -95,6 +97,8 @@ end
 	merged into the target geometry on release. Piece textures are packed into a 2x2 atlas — the
 	top-left cell holds the target's own texture and each merged piece claims one of the
 	remaining cells, with its UVs remapped into that cell.
+
+	`pieceCount` tracks how many pieces are placed, for the UI to subscribe to.
 ]=]
 local function KitbashTool(
 	modelInfo: ModelInfo.ModelInfo,
@@ -109,6 +113,7 @@ local function KitbashTool(
 	object.modelDisplay = modelDisplay
 
 	object.placedPieces = modelInfo:getPlacedKitbashPieces()
+	object.pieceCount = Charm.atom(#object.placedPieces)
 	object.currentlySelectedPiece = nil
 	object.isDragging = false
 	object.isRotating = false
@@ -212,6 +217,8 @@ local function KitbashTool(
 		pieceData.positionMarker:Destroy()
 
 		table.remove(self.placedPieces, self.currentlySelectedPiece)
+		self.pieceCount(#self.placedPieces)
+
 		if #self.placedPieces > 0 then
 			self.currentlySelectedPiece = math.min(self.currentlySelectedPiece, #self.placedPieces)
 
@@ -611,6 +618,7 @@ local function KitbashTool(
 
 		self:updatePieceTransform(newPieceData)
 		table.insert(self.placedPieces, newPieceData)
+		self.pieceCount(#self.placedPieces)
 		self.currentlySelectedPiece = #self.placedPieces
 		self:refreshHandleUI()
 		self:mergeCurrentPiece()

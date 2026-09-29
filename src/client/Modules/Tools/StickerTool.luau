@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
+local Charm = require(ReplicatedStorage.Packages.Charm)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationInput = require("../CreationInput")
@@ -47,8 +48,15 @@ export type StickerData = {
 	isTextureSpace: boolean?,
 }
 
+export type StickersState = {
+	textureIds: { string },
+	selectedIndex: number,
+	count: number,
+}
+
 export type StickerTool = {
 	-- vars
+	state: Charm.Atom<StickersState>,
 	modelInfo: ModelInfo.ModelInfo,
 	isAccessory: boolean,
 	inputManager: CreationInput.CreationInput,
@@ -197,6 +205,9 @@ end
 	Adds stickers to a creation and moves, rotates, scales and tiles them. Each sticker owns its
 	own texture layer and belongs to the paint layer that was active when it was placed. Dragging casts a ray from the camera to the cursor, converts the hit point
 	into UV coordinates, and redraws the sticker at those coordinates on the 2D texture.
+
+	`state` is a snapshot of the applied stickers and the selection, republished after each change,
+	for the UI to subscribe to.
 ]=]
 local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: CreationInput.CreationInput): StickerTool
 	local maid = Maid.new()
@@ -223,6 +234,21 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 	object.maid = maid
 
+	local function publish()
+		local textureIds = {}
+		for index, stickerData in object.appliedStickers do
+			textureIds[index] = stickerData.textureId
+		end
+
+		object.state({
+			textureIds = textureIds,
+			selectedIndex = object.currentlySelectedSticker,
+			count = object.stickerCounter,
+		})
+	end
+	object.state = Charm.atom(nil :: any)
+	publish()
+
 	--[=[
 		@within StickerTool
 		@param index number -- position of the sticker in the applied list
@@ -237,6 +263,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 		textureInfo:getOrCreateEditableImageByTextureId(textureId)
 
 		self:refreshHandleUI()
+		publish()
 	end
 
 	--[=[
@@ -700,6 +727,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 		self.inputGui.Enabled = true
 		self:refreshHandleUI()
+		publish()
 	end
 
 	--[=[
@@ -866,6 +894,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 		self.stickerCounter = self.stickerCounter - 1
 		self:refreshHandleUI()
+		publish()
 
 		if selectedSticker.positionMarker then
 			selectedSticker.positionMarker:Destroy()
@@ -978,6 +1007,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 
 		self.currentlySelectedSticker = math.min(self.currentlySelectedSticker, #self.appliedStickers)
 		self:refreshHandleUI()
+		publish()
 	end
 
 	--[=[
@@ -1060,6 +1090,7 @@ local function StickerTool(modelInfo: ModelInfo.ModelInfo, inputManager: Creatio
 	function object:disable()
 		self.inputGui.Enabled = false
 		self.currentlySelectedSticker = 0
+		publish()
 	end
 
 	function object:destroy()
