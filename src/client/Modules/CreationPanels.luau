@@ -80,7 +80,12 @@ local function CreationPanels(session: any): CreationPanels
 	})) :: ScreenGui
 	session.style:linkGui(object.canvasGui)
 
-	object.uvCanvasUI = maid:add(UVCanvasUI(session, modelInfo, session:getCreationInput(), brushTool, stickerTool))
+	local function closeCanvas()
+		object:toggleCanvas()
+	end
+
+	object.uvCanvasUI =
+		maid:add(UVCanvasUI(session, modelInfo, session:getCreationInput(), brushTool, stickerTool, closeCanvas))
 	object.uvCanvasUI.container.Parent = object.canvasGui
 
 	local function refreshCanvas()

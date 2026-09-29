@@ -6,8 +6,10 @@ local UserInputService = game:GetService("UserInputService")
 local Brushes = require(ReplicatedStorage.Shared.Modules.Brushes)
 local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
+local CreationIcons = require(ReplicatedStorage.Shared.Data.CreationIcons)
 local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
 local EditHandle = require("../Components/EditHandle")
+local IconButton = require("../Components/IconButton")
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local SegmentedControl = require("../Components/SegmentedControl")
 local StyleConsts = require("../Style/StyleConsts")
@@ -81,14 +83,17 @@ export type UVCanvasUI = {
 	Every tool can show it; in `paint` and `sticker` modes the player also paints, erases and places
 	stickers on it directly, while `view` mode only zooms and pans. Strokes reuse [BrushTool]'s linear brush
 	and stickers reuse [StickerTool]'s flat sticker action, so the model updates live and the server
-	replays the same actions it already knows. Owned by [CreationPanels].
+	replays the same actions it already knows. The header's close button calls `onCloseRequested`;
+	once shown, the window keeps its size as panels open and close beside it. Owned by
+	[CreationPanels].
 ]=]
 local function UVCanvasUI(
 	session: any,
 	modelInfo: any,
 	creationInput: any,
 	brushTool: any,
-	stickerTool: any
+	stickerTool: any,
+	onCloseRequested: () -> ()
 ): UVCanvasUI
 	local maid = Maid.new()
 	local object = {} :: UVCanvasUI
@@ -171,6 +176,11 @@ local function UVCanvasUI(
 	resetButton.LayoutOrder = 3
 	StyleUtils.addStyleTag(resetButton, StyleConsts.tags.UVCanvasHeaderButton)
 	resetButton.Parent = object.header
+
+	local closeButton = IconButton(CreationIcons.icons.XButton, onCloseRequested)
+	closeButton.LayoutOrder = 4
+	StyleUtils.addStyleTag(closeButton, StyleConsts.tags.MediumIconButton)
+	closeButton.Parent = object.header
 
 	local function getTextureInfo(): TextureInfo.TextureInfo
 		return object.modelInfo:getTextureInfo()
@@ -371,6 +381,7 @@ local function UVCanvasUI(
 			math.clamp(size.X, config.minWindowSize, math.max(viewportSize.X, config.minWindowSize)),
 			math.clamp(size.Y, config.minWindowSize, math.max(viewportSize.Y, config.minWindowSize))
 		)
+		object.windowSize = size
 
 		local position = object.windowPosition or Vector2.new(right - size.X, (viewportSize.Y - size.Y) / 2)
 		position = Vector2.new(
