@@ -7,7 +7,7 @@ local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationIcons = require(ReplicatedStorage.Shared.Data.CreationIcons)
 local EraserPanel = require(ReplicatedStorage.Interfaces.Views.Creation.EraserPanel)
-local FillToolUI = require("./FillToolUI")
+local FillPanel = require(ReplicatedStorage.Interfaces.Views.Creation.FillPanel)
 local IconButton = require("../Components/IconButton")
 local Kitbash = require(ReplicatedStorage.Shared.Data.Kitbash)
 local KitbashToolUI = require("./KitbashToolUI")
@@ -42,7 +42,7 @@ export type EditingUI = {
 	toolbar: Toolbar.Toolbar,
 	brushToolUI: ReactPanelHost.ReactPanelHost,
 	eraserToolUI: ReactPanelHost.ReactPanelHost,
-	fillToolUI: FillToolUI.FillToolUI?,
+	fillToolUI: ReactPanelHost.ReactPanelHost?,
 	stickerToolUI: StickerToolUI.StickerToolUI,
 	stickerPatternToolUI: StickerPatternToolUI.StickerPatternToolUI,
 	kitbashToolUI: KitbashToolUI.KitbashToolUI,
@@ -216,37 +216,7 @@ local function EditingUI(
 	end
 
 	local function createFillToolUI()
-		local selectedRegionCallback = function(selectedRegion)
-			object.fabricTool:setSelectedRegion(selectedRegion)
-		end
-		local colorPickerCallback = function(color, isFinalInput)
-			object.fabricTool:applyColor(color, isFinalInput)
-		end
-		local reflectiveModeCallback = function(isReflectiveMode)
-			object.fabricTool:setIsReflective(isReflectiveMode)
-			object.fabricTool:reapplyFillForReflectivity()
-		end
-		local opacityPickerCallback = function(opacity)
-			object.fabricTool:setOpacity(opacity)
-		end
-		local deleteCallback = function()
-			object.fabricTool:clearAll()
-		end
-		local regionParts = object.session.modelInfo:getRegionPartsList()
-
-		object.fillToolUI = maid:add(
-			FillToolUI(
-				object.creationInput,
-				onClosePanel,
-				deleteCallback,
-				regionParts,
-				selectedRegionCallback,
-				colorPickerCallback,
-				reflectiveModeCallback,
-				opacityPickerCallback
-			)
-		)
-		object.fillToolUI.panel.frame.Parent = object.panelParent
+		object.fillToolUI = maid:add(ReactPanelHost(object, FillPanel, onClosePanel))
 	end
 
 	local function createLayerColorToolUI()

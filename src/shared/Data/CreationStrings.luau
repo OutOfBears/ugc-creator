@@ -28,6 +28,9 @@ export type CreationStrings = {
 
 	counters: { sticker: string, kitbash: string },
 
+	modelDisplayName: { [string]: string },
+	regionSectionFormat: string,
+
 	panelTitles: {
 		brush: string,
 		eraser: string,
@@ -87,6 +90,13 @@ local strings: CreationStrings = {
 		sticker = "Stickers Applied",
 		kitbash = "Add-Ons Applied",
 	},
+
+	modelDisplayName = {
+		RobotModel = "Body",
+		TShirtModel = "T-Shirt",
+		HatModel = "Hat",
+	},
+	regionSectionFormat = "%s Section",
 
 	panelTitles = {
 		brush = "Paintbrush",

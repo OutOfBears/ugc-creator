@@ -1,6 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
+local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
 local StyleLayouts = require(ReplicatedStorage.Shared.Data.StyleLayouts)
 
 export type ColorPickerColor = {
@@ -135,29 +136,9 @@ local StyleConsts: StyleConsts = {
 		SegmentedControlFill = "SegmentedControlFill",
 	},
 
-	regionOrdering = {
-		RobotModel = 1,
-		TShirtModel = 1,
-		HatModel = 1,
+	regionOrdering = CreationConfig.regionOrdering,
 
-		Hair = 2,
-		Head = 3,
-		Torso = 4,
-		RightArm = 5,
-		LeftArm = 6,
-		RightLeg = 7,
-		LeftLeg = 8,
-
-		Brim = 2,
-		Band = 3,
-		Crown = 4,
-	},
-
-	modelDisplayName = {
-		RobotModel = "Body",
-		TShirtModel = "T-Shirt",
-		HatModel = "Hat",
-	},
+	modelDisplayName = CreationStrings.modelDisplayName,
 
 	mobileWidthCutoff = StyleLayouts.mobileWidthCutoff,
 
