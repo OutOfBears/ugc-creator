@@ -12,8 +12,9 @@ local IconButton = require("../Components/IconButton")
 local Kitbash = require(ReplicatedStorage.Shared.Data.Kitbash)
 local KitbashToolUI = require("./KitbashToolUI")
 local LayerColorToolUI = require("./LayerColorToolUI")
-local LayersToolUI = require("./LayersToolUI")
+local LayersPanel = require(ReplicatedStorage.Interfaces.Views.Creation.LayersPanel)
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
+local ReactPanelHost = require("./ReactPanelHost")
 local StickerPatternToolUI = require("./StickerPatternToolUI")
 local StickerToolUI = require("./StickerToolUI")
 local Stickers = require(ReplicatedStorage.Shared.Data.Stickers)
@@ -47,7 +48,7 @@ export type EditingUI = {
 	kitbashToolUI: KitbashToolUI.KitbashToolUI,
 	layerColorToolUI: LayerColorToolUI.LayerColorToolUI?,
 	accessorySwapToolUI: AccessorySwapToolUI.AccessorySwapToolUI?,
-	layersToolUI: LayersToolUI.LayersToolUI,
+	layersToolUI: ReactPanelHost.ReactPanelHost,
 	uvCanvasUI: UVCanvasUI.UVCanvasUI,
 	canvasButtonGroup: Frame,
 	isCanvasEnabled: boolean,
@@ -650,8 +651,7 @@ local function EditingUI(
 	createStickerPatternToolUI()
 	createKitbashToolUI()
 	createAccessorySwapToolUI()
-	object.layersToolUI = maid:add(LayersToolUI(onClosePanel, object.layersTool))
-	object.layersToolUI.panel.frame.Parent = object.panelParent
+	object.layersToolUI = maid:add(ReactPanelHost(object, LayersPanel, onClosePanel))
 
 	setupToolbar()
 	setupCanvasToolbarButton()

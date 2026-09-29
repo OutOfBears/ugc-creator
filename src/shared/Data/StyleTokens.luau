@@ -117,6 +117,8 @@ export type StyleTable = {
 
 	MiniBaseTileGroupSize: UDim2,
 	BaseTileMinSize: Vector2,
+
+	DisabledTransparency: number,
 }
 
 export type FontTable = {
@@ -299,6 +301,8 @@ local style: StyleTable = {
 
 	MiniBaseTileGroupSize = UDim2.fromOffset(0, 40),
 	BaseTileMinSize = Vector2.new(40, 40),
+
+	DisabledTransparency = 0.6,
 }
 
 local fonts: FontTable = {
