@@ -1,3 +1,7 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local StyleLayouts = require(ReplicatedStorage.Shared.Data.StyleLayouts)
+
 export type ColorPickerColor = {
 	h: number,
 	s: number,
@@ -154,7 +158,7 @@ local StyleConsts: StyleConsts = {
 		HatModel = "Hat",
 	},
 
-	mobileWidthCutoff = 1024,
+	mobileWidthCutoff = StyleLayouts.mobileWidthCutoff,
 
 	defaultColorPickerColor = {
 		h = 0,

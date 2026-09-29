@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
 local BrushTool = require("./BrushTool")
+local Charm = require(ReplicatedStorage.Packages.Charm)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
@@ -13,8 +14,23 @@ local RandId = require(ReplicatedStorage.Shared.Modules.RandId)
 local StickerTool = require("./StickerTool")
 local TextureInfo = require(ReplicatedStorage.Shared.Modules.TextureInfo)
 
+export type LayerSnapshot = {
+	id: string,
+	name: string,
+	visible: boolean,
+	blendMode: string,
+}
+
+export type LayersState = {
+	layers: { LayerSnapshot },
+	activeLayerId: string,
+	canAdd: boolean,
+	canDelete: boolean,
+}
+
 export type LayersTool = {
 	-- vars
+	state: Charm.Atom<LayersState>,
 	modelInfo: ModelInfo.ModelInfo,
 	brushTool: BrushTool.BrushTool,
 	stickerTool: StickerTool.StickerTool,
@@ -45,6 +61,9 @@ export type LayersTool = {
 	Manages the player's paint layer stack: which layer the brush and new stickers target, and
 	adding, deleting, reordering, hiding and re-blending layers. The stack itself lives on
 	[TextureInfo]; layer display names are client-only.
+
+	`state` is an immutable snapshot of the stack, republished after every change, for the UI to
+	subscribe to.
 ]=]
 local function LayersTool(
 	modelInfo: ModelInfo.ModelInfo,
@@ -62,6 +81,25 @@ local function LayersTool(
 	object.maid = maid
 
 	local textureInfo: TextureInfo.TextureInfo = modelInfo:getTextureInfo()
+
+	local function publish()
+		local layers = {}
+		for index, paintLayer in object:getLayers() do
+			layers[index] = {
+				id = paintLayer.id,
+				name = object:getLayerName(paintLayer.id),
+				visible = paintLayer.visible,
+				blendMode = paintLayer.blendMode,
+			}
+		end
+
+		object.state({
+			layers = layers,
+			activeLayerId = object.activeLayerId,
+			canAdd = object:canAddLayer(),
+			canDelete = object:canDeleteLayer(),
+		})
+	end
 
 	--[=[
 		@within LayersTool
@@ -119,6 +157,7 @@ local function LayersTool(
 		self.activeLayerId = layerId
 		self.brushTool:setActivePaintLayer(layerId)
 		self.stickerTool:setActivePaintLayer(layerId)
+		publish()
 	end
 
 	--[=[
@@ -135,6 +174,7 @@ local function LayersTool(
 		end
 
 		Network.fire("SubmitAction", action)
+		publish()
 
 		return true
 	end
@@ -249,6 +289,7 @@ local function LayersTool(
 	end
 
 	local layers = object:getLayers()
+	object.state = Charm.atom(nil :: any)
 	object:selectLayer(layers[#layers].id)
 
 	return object

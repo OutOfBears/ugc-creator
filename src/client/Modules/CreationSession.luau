@@ -7,6 +7,7 @@ local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
 local BaseUI = require("./UI/Handlers/BaseUI")
 local BrushTool = require("./Tools/BrushTool")
 local CameraManager = require("./CameraManager")
+local ClientAtoms = require("./ClientAtoms")
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationInput = require("./CreationInput")
 local FabricTool = require("./Tools/FabricTool")
@@ -24,8 +25,11 @@ local StyleUtils = require("./UI/Style/StyleUtils")
 
 local player = Players.LocalPlayer
 
+local nextSessionId = 0
+
 export type CreationSession = {
 	-- vars
+	id: number,
 	modelInfo: ModelInfo.ModelInfo,
 	cameraManager: CameraManager.CameraManager,
 	modelDisplay: ModelDisplay.ModelDisplay,
@@ -90,6 +94,8 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 
 	playerControls():Disable()
 
+	nextSessionId += 1
+	object.id = nextSessionId
 	object.modelInfo = modelInfo
 	object.editMode = CreationConfig.editModes.none
 	object.cameraResetPosition = workspace.CurrentCamera.CFrame.Position
@@ -245,6 +251,10 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 	end
 
 	function object:destroy()
+		if ClientAtoms.creationSession() == object then
+			ClientAtoms.creationSession(nil)
+		end
+
 		maid:doCleaning()
 
 		local camera = workspace.CurrentCamera
@@ -323,6 +333,8 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 	maid:add(screenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
 		object.isMobile = StyleUtils.getIsMobile(screenGui)
 	end))
+
+	ClientAtoms.creationSession(object)
 
 	return object
 end
