@@ -1,20 +1,18 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Charm = require(ReplicatedStorage.Packages.Charm)
 local ClientAtoms = require("./ClientAtoms")
-local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationIcons = require(ReplicatedStorage.Shared.Data.CreationIcons)
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
-local UVCanvasUI = require("./UI/Handlers/UVCanvasUI")
+local UVCanvas = require("./UVCanvas")
 
 export type Tool = {
 	id: string,
 	icon: string,
 	mutedIcon: string?,
 	panel: string?,
-	canvasMode: UVCanvasUI.UVCanvasMode?,
+	canvasMode: UVCanvas.UVCanvasMode?,
 	pansCamera: boolean?,
 	activate: (() -> ())?,
 	widgetGroup: string?,
@@ -26,8 +24,7 @@ export type CreationPanels = {
 	activeTool: Charm.Atom<string?>,
 	canvasEnabled: Charm.Atom<boolean>,
 	toolbarGroups: { { Tool } },
-	uvCanvasUI: UVCanvasUI.UVCanvasUI,
-	canvasGui: ScreenGui,
+	canvas: UVCanvas.UVCanvas,
 	maid: Maid.Maid,
 	-- methods
 	activate: (self: CreationPanels, toolId: string) -> (),
@@ -67,39 +64,27 @@ local function CreationPanels(session: any): CreationPanels
 
 	local toolsById: { [string]: Tool } = {}
 	local panelFrames: { [string]: Frame? } = {}
-	local canvasTarget: { panel: string, mode: UVCanvasUI.UVCanvasMode }? = nil
-
-	object.canvasGui = maid:add(Create("ScreenGui", {
-		Name = "UVCanvasUI",
-		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-		DisplayOrder = 5,
-		ResetOnSpawn = false,
-		IgnoreGuiInset = true,
-		ScreenInsets = Enum.ScreenInsets.None,
-		Parent = Players.LocalPlayer:WaitForChild("PlayerGui"),
-	})) :: ScreenGui
-	session.style:linkGui(object.canvasGui)
+	local canvasTarget: { panel: string, mode: UVCanvas.UVCanvasMode }? = nil
 
 	local function closeCanvas()
 		object:toggleCanvas()
 	end
 
-	object.uvCanvasUI = maid:add(UVCanvasUI(modelInfo, session:getCreationInput(), brushTool, stickerTool, closeCanvas))
-	object.uvCanvasUI.container.Parent = object.canvasGui
+	object.canvas = maid:add(UVCanvas(modelInfo, session:getCreationInput(), brushTool, stickerTool, closeCanvas))
 
 	local function refreshCanvas()
-		local uvCanvasUI = object.uvCanvasUI
+		local canvas = object.canvas
 
 		if not object.canvasEnabled() or ClientAtoms.isMobile() then
-			uvCanvasUI:close()
+			canvas:close()
 			return
 		end
 
 		local target = canvasTarget
 		if target then
-			uvCanvasUI:open(target.mode, panelFrames[target.panel])
+			canvas:open(target.mode, panelFrames[target.panel])
 		else
-			uvCanvasUI:open("view", nil)
+			canvas:open("view", nil)
 		end
 	end
 
@@ -123,7 +108,7 @@ local function CreationPanels(session: any): CreationPanels
 		id: string,
 		icon: string,
 		mutedIcon: string?,
-		canvasMode: UVCanvasUI.UVCanvasMode,
+		canvasMode: UVCanvas.UVCanvasMode,
 		pansCamera: boolean,
 		activate: (() -> ())?
 	): Tool
@@ -241,7 +226,7 @@ local function CreationPanels(session: any): CreationPanels
 			session:panToLeft()
 		end
 
-		canvasTarget = { panel = definition.panel :: string, mode = definition.canvasMode :: UVCanvasUI.UVCanvasMode }
+		canvasTarget = { panel = definition.panel :: string, mode = definition.canvasMode :: UVCanvas.UVCanvasMode }
 		refreshCanvas()
 	end
 
@@ -295,15 +280,13 @@ local function CreationPanels(session: any): CreationPanels
 	function object:hide()
 		closeAndDisableTools()
 		self.activeTool(nil)
-		self.uvCanvasUI:close()
-		self.canvasGui.Enabled = false
+		self.canvas:close()
 	end
 
 	--[=[
 		@within CreationPanels
 	]=]
 	function object:show()
-		self.canvasGui.Enabled = true
 		refreshCanvas()
 	end
 

@@ -14,14 +14,15 @@ export type ToggleButtonProps = {
 	initialOn: boolean?,
 	onToggle: (isOn: boolean) -> (),
 	layoutOrder: number?,
+	alignLeft: boolean?,
 }
 
 --[=[
 	@class ToggleButton
 	@client
 
-	A labelled on/off pill, right-aligned in its row. It owns its on state and reports each flip
-	through `onToggle`.
+	A labelled on/off pill, right-aligned in its row unless `alignLeft` hugs it to the left. It owns
+	its on state and reports each flip through `onToggle`.
 ]=]
 local ToggleButton = memo(function(props: ToggleButtonProps)
 	local theme = useTheme()
@@ -34,11 +35,13 @@ local ToggleButton = memo(function(props: ToggleButtonProps)
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder,
-		Size = UDim2.fromScale(1, 0),
+		Size = if props.alignLeft then UDim2.fromScale(0, 0) else UDim2.fromScale(1, 0),
 	}, {
 		listLayout = createElement("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			HorizontalAlignment = if props.alignLeft
+				then Enum.HorizontalAlignment.Left
+				else Enum.HorizontalAlignment.Right,
 			ItemLineAlignment = Enum.ItemLineAlignment.Center,
 			Padding = tokens.Padding.Small,
 			SortOrder = Enum.SortOrder.LayoutOrder,
