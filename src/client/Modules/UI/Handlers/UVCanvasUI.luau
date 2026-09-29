@@ -37,7 +37,6 @@ type Gesture =
 
 export type UVCanvasUI = {
 	-- vars
-	session: any,
 	modelInfo: any,
 	creationInput: any,
 	brushTool: any,
@@ -88,7 +87,6 @@ export type UVCanvasUI = {
 	[CreationPanels].
 ]=]
 local function UVCanvasUI(
-	session: any,
 	modelInfo: any,
 	creationInput: any,
 	brushTool: any,
@@ -98,7 +96,6 @@ local function UVCanvasUI(
 	local maid = Maid.new()
 	local object = {} :: UVCanvasUI
 
-	object.session = session
 	object.modelInfo = modelInfo
 	object.creationInput = creationInput
 	object.brushTool = brushTool
@@ -769,8 +766,6 @@ local function UVCanvasUI(
 
 		updateStickerPlacement()
 		updateCursor(nil)
-
-		self.session:panForCanvas()
 	end
 
 	--[=[

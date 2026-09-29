@@ -67,7 +67,6 @@ export type CreationSession = {
 	exitEditMode: (self: CreationSession) -> (),
 	resetCamera: (self: CreationSession) -> (),
 	panToLeft: (self: CreationSession) -> (),
-	panForCanvas: (self: CreationSession) -> (),
 	getWidgetGroupNames: (self: CreationSession) -> { string },
 	showMeshEditControls: (self: CreationSession, controlGroupName: string) -> (),
 	hideMeshEditControls: (self: CreationSession) -> (),
@@ -161,16 +160,6 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 	]=]
 	function object:panToLeft()
 		self.cameraManager:panToLeft(ClientAtoms.isMobile())
-	end
-
-	--[=[
-		@within CreationSession
-
-		Slides the model to the far left so the 2D canvas and its panel both fit beside it.
-	]=]
-	function object:panForCanvas()
-		local viewportWidth = workspace.CurrentCamera.ViewportSize.X
-		self.cameraManager:panX(viewportWidth / 2 - viewportWidth * CreationConfig.uvCanvas.modelScreenXScale)
 	end
 
 	--[=[

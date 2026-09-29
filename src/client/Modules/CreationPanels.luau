@@ -84,22 +84,14 @@ local function CreationPanels(session: any): CreationPanels
 		object:toggleCanvas()
 	end
 
-	object.uvCanvasUI =
-		maid:add(UVCanvasUI(session, modelInfo, session:getCreationInput(), brushTool, stickerTool, closeCanvas))
+	object.uvCanvasUI = maid:add(UVCanvasUI(modelInfo, session:getCreationInput(), brushTool, stickerTool, closeCanvas))
 	object.uvCanvasUI.container.Parent = object.canvasGui
 
 	local function refreshCanvas()
 		local uvCanvasUI = object.uvCanvasUI
 
 		if not object.canvasEnabled() or ClientAtoms.isMobile() then
-			if uvCanvasUI:isOpen() then
-				uvCanvasUI:close()
-				if canvasTarget then
-					session:panToLeft()
-				else
-					session:resetCamera()
-				end
-			end
+			uvCanvasUI:close()
 			return
 		end
 
