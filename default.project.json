@@ -13,6 +13,9 @@
       "Client": {
         "$path": "src/client"
       },
+      "Interfaces": {
+        "$path": "src/interfaces"
+      },
       "Settings": {
         "$path": "src/Settings.json"
       },

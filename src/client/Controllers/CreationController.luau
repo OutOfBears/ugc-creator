@@ -3,17 +3,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AccessoryUtils = require(ReplicatedStorage.Shared.Modules.Utils.AccessoryUtils)
 local AttachmentUtils = require(ReplicatedStorage.Shared.Modules.Utils.AttachmentUtils)
 local Blanks = require(ReplicatedStorage.Shared.Data.Blanks)
+local ClientAtoms = require("../Modules/ClientAtoms")
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationSession = require("../Modules/CreationSession")
 local CreationStrings = require(ReplicatedStorage.Shared.Data.CreationStrings)
-local LoadingScreen = require("../Modules/UI/LoadingScreen")
+local LoadingScreen = require("../Modules/LoadingScreen")
 local Logger = require(ReplicatedStorage.Shared.Modules.Logger)
-local Message = require("../Modules/UI/Message")
+local Message = require("../Modules/Message")
 local ModelInfo = require(ReplicatedStorage.Shared.Modules.ModelInfo)
 local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
 local ResolutionManager = require(ReplicatedStorage.Shared.Modules.ResolutionManager)
-local StyleSheet = require("../Modules/UI/Style/StyleSheet")
-local SwitchEditorsModalUI = require("../Modules/UI/Handlers/SwitchEditorsModalUI")
 local Types = require(ReplicatedStorage.Shared.Types)
 
 local logger = Logger.new()
@@ -209,11 +208,8 @@ local function withResolutionRetry(attempt: () -> ())
 end
 
 local function openSwitchEditorsModal(blank: Blanks.Blank)
-	local style = StyleSheet()
-
 	local function onBuy()
 		Network.fire("PublishModel")
-		style:destroy()
 	end
 
 	local function onContinue()
@@ -222,17 +218,17 @@ local function openSwitchEditorsModal(blank: Blanks.Blank)
 		withResolutionRetry(function()
 			lastModelInfo = initModelFromBlank(blank)
 			startSession(lastModelInfo :: ModelInfo.ModelInfo)
-			style:destroy()
 		end)
 	end
 
-	local function onCancel()
-		style:destroy()
-	end
+	local function onCancel() end
 
-	local creationPrice = if lastModelInfo then lastModelInfo:getCreationPrice() else 0
-
-	SwitchEditorsModalUI(style, creationPrice, onBuy, onContinue, onCancel)
+	ClientAtoms.switchEditorsPrompt({
+		creationPrice = if lastModelInfo then lastModelInfo:getCreationPrice() else 0,
+		onBuy = onBuy,
+		onContinue = onContinue,
+		onCancel = onCancel,
+	})
 end
 
 --[=[

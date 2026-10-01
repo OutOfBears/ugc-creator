@@ -27,6 +27,31 @@ export type CreationStrings = {
 	layerHiddenPaint: string,
 
 	counters: { sticker: string, kitbash: string },
+
+	modelDisplayName: { [string]: string },
+	regionSectionFormat: string,
+
+	modalButtons: { ok: string, cancel: string, continue: string },
+	previewTargets: { string },
+	loading: string,
+
+	panelTitles: {
+		brush: string,
+		eraser: string,
+		recolor: string,
+		layerColor: string,
+		stickers: string,
+		pattern: string,
+		kitbash: string,
+		accessories: string,
+	},
+	toolTitles: {
+		brushSize: string,
+		color: string,
+		padding: string,
+		pattern: string,
+		sections: string,
+	},
 }
 
 --[=[
@@ -68,6 +93,39 @@ local strings: CreationStrings = {
 	counters = {
 		sticker = "Stickers Applied",
 		kitbash = "Add-Ons Applied",
+	},
+
+	modelDisplayName = {
+		RobotModel = "Body",
+		TShirtModel = "T-Shirt",
+		HatModel = "Hat",
+	},
+	regionSectionFormat = "%s Section",
+
+	modalButtons = {
+		ok = "Ok",
+		cancel = "Cancel",
+		continue = "Continue",
+	},
+	previewTargets = { "Default", "My Avatar" },
+	loading = "Loading…",
+
+	panelTitles = {
+		brush = "Paintbrush",
+		eraser = "Eraser",
+		recolor = "Recolor",
+		layerColor = "Colors",
+		stickers = "Stickers",
+		pattern = "Pattern",
+		kitbash = "Add-Ons",
+		accessories = "Accessories",
+	},
+	toolTitles = {
+		brushSize = "Brush Size",
+		color = "Color",
+		padding = "Padding",
+		pattern = "Pattern",
+		sections = "Sections",
 	},
 }
 

@@ -117,6 +117,8 @@ export type StyleTable = {
 
 	MiniBaseTileGroupSize: UDim2,
 	BaseTileMinSize: Vector2,
+
+	DisabledTransparency: number,
 }
 
 export type FontTable = {
@@ -299,6 +301,8 @@ local style: StyleTable = {
 
 	MiniBaseTileGroupSize = UDim2.fromOffset(0, 40),
 	BaseTileMinSize = Vector2.new(40, 40),
+
+	DisabledTransparency = 0.6,
 }
 
 local fonts: FontTable = {
@@ -344,8 +348,8 @@ local fonts: FontTable = {
 --[=[
 	@class StyleTokens
 
-	The visual design tokens the style manager applies to UI components — colors, strokes, spacing,
-	component sizes, and the BuilderSans font pairings built from them.
+	The visual design tokens the React UI styles itself from (through `useTheme`) — colors, strokes,
+	spacing, component sizes, and the BuilderSans font pairings built from them.
 ]=]
 local tokens: StyleTokens = {
 	style = style,

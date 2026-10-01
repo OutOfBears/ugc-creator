@@ -256,7 +256,7 @@ existing logic is the most common form of sloppy code here.
   - Feature helpers in `src/shared/Modules/Utils/` (`RagdollUtils`, `RagdollConfig`, `CharacterUtils`, `AudioUtil`, `RaycastUtils`, …) — check here before writing feature logic.
 - `src/server/Modules/` — shared server systems (`GameStateReplicator`). Per-frame loops/registries and long-lived systems in `src/server/Services/` (`BehaviorsService`, `PlayerService`, `HiddenObjectService`, `KonsoleService`, `SoftShutdownService`).
 - `src/client/Modules/` — `ClientAtoms` (charm state), `ClientEvents`, `ClientEffects`, `CameraShaker`, `LightningBolt`, `InputContext`. Controllers in `src/client/Controllers/` (`InputController`, `UIController`, `CoreGuiController`, `VFXController`, `DebugController`, …).
-- `src/interfaces/Hooks/` — React hooks: `useAtom` / `useAtomBinding`, `useReplicator` / `useReplicatorValue` / `useReplicatorBinding`, `useEvent`, `useBehavior`, `useGameState`, `useProfile`, `usePlayerStat`, `useFontScale`, `useVisible`, `useMousePosition`, `useLatest`.
+- `src/interfaces/Hooks/` — React hooks: `useAtom` / `useAtomBinding`, `useEvent`, `useFontScale`, `useVisible`, `useMousePosition`, `useLatest`, `useTheme`, `useCreationSession`.
 
 ### Data and constants live in `Data/`, not scattered at file tops
 
@@ -296,7 +296,9 @@ behavior's `state` table, not via `instance:SetAttribute(...)`.** Reach for raw
   - `Behaviors/` (`Client<Name>` pairs), `Controllers/` (long-lived systems), `Modules/`
 - `src/shared/` → `ReplicatedStorage.Shared` — runs on both sides
   - `Modules/` (utilities), `Behaviors/` + `Data/` (shared bases and data tables)
-- `src/interfaces/` → `ReplicatedStorage.Interfaces` — cross-boundary types and contracts
+- `src/interfaces/` → `ReplicatedStorage.Interfaces` — React UI (`Views/`, `Components/`,
+  `Contexts/`, `Hooks/`, `Stories/`); `UIController` mounts each `Views/` module. Scaffold with the
+  `/ui` skill. See `docs/ui-architecture.md`.
 - `src/Server.server.luau`, `src/Client.client.luau` — top-level runtime entrypoints
 - `Packages/` → `ReplicatedStorage.Packages` (shared, Wally); `ServerPackages/` →
   `ServerScriptService.Packages` (server-only, Wally)

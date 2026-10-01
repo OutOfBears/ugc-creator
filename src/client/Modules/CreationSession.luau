@@ -5,11 +5,14 @@ local UserInputService = game:GetService("UserInputService")
 
 local AccessorySwapTool = require("./Tools/AccessorySwapTool")
 local Actions = require(ReplicatedStorage.Shared.Modules.Actions)
-local BaseUI = require("./UI/Handlers/BaseUI")
 local BrushTool = require("./Tools/BrushTool")
 local CameraManager = require("./CameraManager")
+local Charm = require(ReplicatedStorage.Packages.Charm)
+local ClientAtoms = require("./ClientAtoms")
+local CoreGuiController = require("../Controllers/CoreGuiController")
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local CreationInput = require("./CreationInput")
+local CreationPanels = require("./CreationPanels")
 local FabricTool = require("./Tools/FabricTool")
 local KitbashTool = require("./Tools/KitbashTool")
 local LayerColorTool = require("./Tools/LayerColorTool")
@@ -21,12 +24,17 @@ local ModelInfo = require(ReplicatedStorage.Shared.Modules.ModelInfo)
 local Network = require(ReplicatedStorage.Shared.Modules.Network).client()
 local PreviewTool = require("./Tools/PreviewTool")
 local StickerTool = require("./Tools/StickerTool")
-local StyleUtils = require("./UI/Style/StyleUtils")
 
 local player = Players.LocalPlayer
 
+local nextSessionId = 0
+
+export type Screen = "edit" | "preview"
+export type Modal = "resetEdits" | "accessoryAdjustment"
+
 export type CreationSession = {
 	-- vars
+	id: number,
 	modelInfo: ModelInfo.ModelInfo,
 	cameraManager: CameraManager.CameraManager,
 	modelDisplay: ModelDisplay.ModelDisplay,
@@ -40,9 +48,12 @@ export type CreationSession = {
 	layerColorTool: LayerColorTool.LayerColorTool?,
 	accessorySwapTool: AccessorySwapTool.AccessorySwapTool?,
 	layersTool: LayersTool.LayersTool,
-	baseUI: BaseUI.BaseUI,
+	panels: CreationPanels.CreationPanels,
+	screen: Charm.Atom<Screen>,
+	modal: Charm.Atom<Modal?>,
+	previewTarget: Charm.Atom<number>,
+	hasSeenAccessoryAdjustment: boolean,
 	editMode: number,
-	isMobile: boolean,
 	cameraResetPosition: Vector3,
 	maid: Maid.Maid,
 	onQuit: (() -> ())?,
@@ -54,13 +65,16 @@ export type CreationSession = {
 	exitEditMode: (self: CreationSession) -> (),
 	resetCamera: (self: CreationSession) -> (),
 	panToLeft: (self: CreationSession) -> (),
-	panForCanvas: (self: CreationSession) -> (),
 	getWidgetGroupNames: (self: CreationSession) -> { string },
 	showMeshEditControls: (self: CreationSession, controlGroupName: string) -> (),
 	hideMeshEditControls: (self: CreationSession) -> (),
 	isShowingMeshEditControls: (self: CreationSession) -> boolean,
 	getCreationInput: (self: CreationSession) -> CreationInput.CreationInput,
 	getCreationType: (self: CreationSession) -> string,
+	openAvatarPreview: (self: CreationSession) -> (),
+	returnToEditor: (self: CreationSession) -> (),
+	setPreviewTarget: (self: CreationSession, target: number) -> (),
+	publish: (self: CreationSession) -> (),
 	quit: (self: CreationSession) -> (),
 	destroy: (self: CreationSession) -> (),
 }
@@ -82,9 +96,10 @@ end
 	One editing session over one [ModelInfo] — the camera, input, display, the five tools and
 	the UI, built together and torn down together.
 
-	[CreationController] owns the lifecycle; this is what the UI handlers are handed and call
-	back into. A session is created and destroyed every time the player opens or leaves the
-	editor, so it is deliberately not a singleton.
+	[CreationController] owns the lifecycle; the React views reach it through
+	`ClientAtoms.creationSession` and call back into it. A session is created and destroyed every
+	time the player opens or leaves the editor, so it is deliberately not a singleton. `screen`,
+	`modal` and `previewTarget` are the editor-wide UI state those views render from.
 ]=]
 local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 	local maid = Maid.new()
@@ -92,9 +107,15 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 
 	playerControls():Disable()
 
+	nextSessionId += 1
+	object.id = nextSessionId
 	object.modelInfo = modelInfo
 	object.editMode = CreationConfig.editModes.none
 	object.cameraResetPosition = workspace.CurrentCamera.CFrame.Position
+	object.screen = Charm.atom("edit" :: Screen)
+	object.modal = Charm.atom(nil :: Modal?)
+	object.previewTarget = Charm.atom(1)
+	object.hasSeenAccessoryAdjustment = false
 	object.maid = maid
 
 	--[=[
@@ -136,17 +157,7 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 		Slides the model left so an open panel does not cover it.
 	]=]
 	function object:panToLeft()
-		self.cameraManager:panToLeft(self.isMobile)
-	end
-
-	--[=[
-		@within CreationSession
-
-		Slides the model to the far left so the 2D canvas and its panel both fit beside it.
-	]=]
-	function object:panForCanvas()
-		local viewportWidth = workspace.CurrentCamera.ViewportSize.X
-		self.cameraManager:panX(viewportWidth / 2 - viewportWidth * CreationConfig.uvCanvas.modelScreenXScale)
+		self.cameraManager:panToLeft(ClientAtoms.isMobile())
 	end
 
 	--[=[
@@ -213,6 +224,69 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 		return self.modelInfo:getCreationType()
 	end
 
+	local function previewCurrentTarget()
+		local previewTool = object.previewTool :: PreviewTool.PreviewTool
+		if object.previewTarget() == 1 then
+			previewTool:moveCameraToRoxy()
+		else
+			previewTool:moveCameraToPlayerAvatar()
+		end
+	end
+
+	--[=[
+		@within CreationSession
+
+		Swaps the editing tools out for the avatar preview. Accessories only.
+	]=]
+	function object:openAvatarPreview()
+		self.panels:hide()
+		self.screen("preview")
+
+		local previewTool = self.previewTool :: PreviewTool.PreviewTool
+		previewTool:applyAccessoryToBodies()
+		previewCurrentTarget()
+	end
+
+	--[=[
+		@within CreationSession
+	]=]
+	function object:returnToEditor()
+		local previewTool = self.previewTool :: PreviewTool.PreviewTool
+		previewTool:endPreview()
+
+		self.screen("edit")
+		self.panels:show()
+	end
+
+	--[=[
+		@within CreationSession
+		@param target number -- 1 previews on the stock avatar, 2 on the player's own
+
+		The first switch to the player's own avatar warns that rigid accessories may need adjusting.
+	]=]
+	function object:setPreviewTarget(target: number)
+		local avatarAssetType = self.modelInfo:getAvatarAssetType()
+		local shouldWarn = avatarAssetType ~= nil and CreationConfig.adjustableRigidAccessories[avatarAssetType]
+
+		if target == 2 and not self.hasSeenAccessoryAdjustment and shouldWarn then
+			self.hasSeenAccessoryAdjustment = true
+			self.modal("accessoryAdjustment")
+		end
+
+		self.previewTarget(target)
+		previewCurrentTarget()
+	end
+
+	--[=[
+		@within CreationSession
+
+		Publishes the creation and leaves the editor.
+	]=]
+	function object:publish()
+		Network.fire("PublishModel")
+		self:quit()
+	end
+
 	--[=[
 		@within CreationSession
 
@@ -247,6 +321,10 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 	end
 
 	function object:destroy()
+		if ClientAtoms.creationSession() == object then
+			ClientAtoms.creationSession(nil)
+		end
+
 		maid:doCleaning()
 
 		local camera = workspace.CurrentCamera
@@ -269,7 +347,7 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 		end
 	end
 
-	-- Built last: BaseUI and its handlers call back into this object during their own
+	-- Built last: CreationPanels and the canvas call back into this object during their own
 	-- construction, so every method above must already exist by the time they run.
 
 	object.cameraManager = maid:add(CameraManager(modelInfo))
@@ -294,19 +372,32 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 		object.accessorySwapTool = maid:add(AccessorySwapTool(modelInfo))
 	end
 
-	object.baseUI = maid:add(
-		BaseUI(
-			object,
-			modelInfo,
-			object.fabricTool,
-			object.stickerTool,
-			object.brushTool,
-			object.kitbashTool,
-			object.previewTool,
-			object.layerColorTool,
-			object.layersTool
-		)
-	)
+	local playerGui = player:WaitForChild("PlayerGui") :: PlayerGui
+	local previousScreenOrientation = playerGui.ScreenOrientation
+	playerGui.ScreenOrientation = Enum.ScreenOrientation.LandscapeRight
+	CoreGuiController.disableCoreGui(Enum.CoreGuiType.All)
+	CoreGuiController.setCore("ChatActive", false)
+
+	local character = player.Character
+	if not character or character.Parent == nil then
+		character = player.CharacterAdded:Wait()
+	end
+	local humanoid = (character :: Model):WaitForChild("Humanoid") :: Humanoid
+	humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+
+	maid:add(function()
+		CoreGuiController.enableCoreGui(Enum.CoreGuiType.All)
+		CoreGuiController.setCore("ChatActive", true)
+		playerGui.ScreenOrientation = previousScreenOrientation
+
+		local currentCharacter = player.Character
+		local currentHumanoid = currentCharacter and currentCharacter:FindFirstChildOfClass("Humanoid")
+		if currentHumanoid then
+			currentHumanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+		end
+	end)
+
+	object.panels = maid:add(CreationPanels(object))
 
 	object.meshEditingWidgets =
 		maid:add(MeshEditingWidgets(modelInfo, object.modelDisplay, object.creationInput, object.cameraManager))
@@ -323,12 +414,7 @@ local function CreationSession(modelInfo: ModelInfo.ModelInfo): CreationSession
 		end
 	end))
 
-	local screenGui = object.baseUI.screenGui
-	object.isMobile = StyleUtils.getIsMobile(screenGui)
-
-	maid:add(screenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-		object.isMobile = StyleUtils.getIsMobile(screenGui)
-	end))
+	ClientAtoms.creationSession(object)
 
 	return object
 end

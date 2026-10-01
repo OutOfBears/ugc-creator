@@ -1,18 +1,13 @@
 local ContextActionService = game:GetService("ContextActionService")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local CameraManager = require("./CameraManager")
-local Create = require(ReplicatedStorage.Shared.Modules.Create)
 local CreationConfig = require(ReplicatedStorage.Shared.Data.CreationConfig)
 local InputContext = require("./InputContext")
 local Maid = require(ReplicatedStorage.Shared.Modules.Maid)
 local ModelDisplay = require("./ModelDisplay")
-
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local CREATION_CONTEXT = "creation"
 local GAMEPAD_ACTION_NAME = "RotateAndZoom"
@@ -27,8 +22,8 @@ type ActiveInput = {
 export type CreationInput = {
 	-- vars
 	maid: Maid.Maid,
-	screenGui: ScreenGui,
 	-- methods
+	onCaptureScroll: (self: CreationInput, input: InputObject) -> (),
 	tryGrabLock: (self: CreationInput, grabber: any) -> boolean,
 	isLocked: (self: CreationInput) -> boolean,
 	destroy: (self: CreationInput) -> (),
@@ -127,23 +122,6 @@ local function CreationInput(
 
 	local gamepadInputState: Enum.UserInputState? = nil
 	local gamepadInputObject: InputObject? = nil
-
-	local screenGui = Create("ScreenGui", {
-		Name = "CameraInputCapture",
-		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-		DisplayOrder = 0,
-		ResetOnSpawn = false,
-		Children = {
-			Create("Frame", {
-				Name = "InputCapture",
-				BackgroundTransparency = 1,
-				Size = UDim2.fromScale(1, 1),
-			}),
-		},
-		Parent = PlayerGui,
-	}) :: ScreenGui
-
-	maid:giveTask(screenGui)
 
 	local function getActiveInput(inputObject: InputObject): ActiveInput?
 		local isTouch, isMouseButton, isGamepadButton, isGamepadThumbstick = splitInputType(inputObject)
@@ -358,7 +336,16 @@ local function CreationInput(
 	end
 
 	object.maid = maid
-	object.screenGui = screenGui
+
+	--[=[
+		@within CreationInput
+		@param input InputObject -- a scroll over the full-screen camera capture
+
+		Zooms the camera. The UI forwards scrolls here only where no other UI covers the screen.
+	]=]
+	function object:onCaptureScroll(input: InputObject)
+		handleScroll(input)
+	end
 
 	--[=[
 		@within CreationInput
@@ -390,7 +377,6 @@ local function CreationInput(
 	bindCreationContext(maid)
 
 	maid.inputBegan = UserInputService.InputBegan:Connect(onInputBegan)
-	maid.scroll = (screenGui :: any).InputCapture.InputChanged:Connect(handleScroll)
 	maid.touchPinch = UserInputService.TouchPinch:Connect(onTouchPinch)
 
 	ContextActionService:UnbindAction(GAMEPAD_ACTION_NAME)
